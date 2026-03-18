@@ -5,6 +5,8 @@ Serves the built React frontend as static files when available.
 """
 from __future__ import annotations
 
+from typing import Optional
+
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -27,13 +29,13 @@ async def get_stats():
 
 @app.get("/api/ideas")
 async def list_ideas(
-    status: str | None = None,
+    status: Optional[str] = None,
     sort: str = "score",
     order: str = "desc",
-    filming_setup: str | None = None,
-    format: str | None = None,
-    top_pick: str | None = None,
-    search: str | None = None,
+    filming_setup: Optional[str] = None,
+    format: Optional[str] = None,
+    top_pick: Optional[str] = None,
+    search: Optional[str] = None,
 ):
     """List all ideas with optional filtering and sorting."""
     ideas = await notion.query_all_ideas()

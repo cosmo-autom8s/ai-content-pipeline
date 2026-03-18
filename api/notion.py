@@ -121,7 +121,7 @@ def _parse_idea_list(page: dict) -> dict:
         "name": _get_text(props, "Name"),
         "score": _get_number(props, "Score"),
         "top_pick": _get_checkbox(props, "Top Pick"),
-        "status": _get_status(props, "Status"),
+        "status": _get_select(props, "Status"),
         "main_topic": _get_text(props, "Main Topic"),
         "format": _get_select(props, "Format"),
         "filming_setup": _get_multi_select(props, "Filming Setup"),
@@ -167,13 +167,20 @@ def _parse_idea_detail(page: dict) -> dict:
         "hook_5": _get_text(props, "Hook 5"),
         "original_url": _get_url(props, "Original URL"),
         "source_link_ids": _get_relation(props, "Source Link"),
-        "filmed_date": _get_date(props, "filmed_date"),
-        "posted_date": _get_date(props, "posted_date"),
-        "caption_tiktok": _get_text(props, "caption_tiktok"),
-        "caption_instagram": _get_text(props, "caption_instagram"),
-        "caption_youtube": _get_text(props, "caption_youtube"),
-        "caption_linkedin": _get_text(props, "caption_linkedin"),
-        "post_urls": _parse_post_urls(_get_text(props, "post URLs")),
+        "filmed_date": _get_date(props, "Filmed Date"),
+        "posted_date": _get_date(props, "Posted Date"),
+        "caption_tiktok": _get_text(props, "Caption TikTok"),
+        "caption_instagram": _get_text(props, "Caption Instagram"),
+        "caption_youtube": _get_text(props, "Caption YouTube"),
+        "caption_linkedin": _get_text(props, "Caption LinkedIn"),
+        "post_urls": [
+            url for url in [
+                _get_url(props, "Post URL TikTok"),
+                _get_url(props, "Post URL Instagram"),
+                _get_url(props, "Post URL YouTube"),
+                _get_url(props, "Post URL LinkedIn"),
+            ] if url
+        ],
     })
     return idea
 
