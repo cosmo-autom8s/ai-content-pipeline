@@ -45,11 +45,12 @@ async def list_ideas(
         allowed = {s.strip().lower() for s in status.split(",")}
         ideas = [i for i in ideas if (i["status"] or "").lower() in allowed]
 
-    # 2. Filming setup filter
+    # 2. Filming setup filter (comma-separated)
     if filming_setup:
+        allowed = {s.strip().lower() for s in filming_setup.split(",")}
         ideas = [
             i for i in ideas
-            if filming_setup.lower() in [s.lower() for s in i["filming_setup"]]
+            if any(s.lower() in allowed for s in i["filming_setup"])
         ]
 
     # 3. Format filter

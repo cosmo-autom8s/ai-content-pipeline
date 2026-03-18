@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import styled from 'styled-components'
+import styled, { useTheme } from 'styled-components'
 
 const Bar = styled.div`
   background: ${({ theme }) => theme.colors.surface};
@@ -125,30 +125,22 @@ const Separator = styled.div`
 const STATUSES = ['new', 'queued', 'filming_today', 'filmed', 'captioned', 'posted', 'archived']
 const FILMING_SETUPS = ['talking_head', 'screen_recording', 'walk_and_talk', 'studio', 'split_screen_react']
 
-const STATUS_COLORS = {
-  new: '#5b7ff5',
-  queued: '#a78bfa',
-  filming_today: '#f59e0b',
-  filmed: '#4ade80',
-  captioned: '#2dd4bf',
-  posted: '#34d399',
-  archived: '#6b7280',
-}
-
-const SETUP_COLORS = {
-  talking_head: '#5b7ff5',
-  screen_recording: '#a78bfa',
-  walk_and_talk: '#f59e0b',
-  studio: '#4ade80',
-  split_screen_react: '#3b82f6',
-}
-
 function formatLabel(value) {
   return value.replace(/_/g, ' ')
 }
 
 function FilterBar({ filters, onFilterChange, ideas }) {
+  const theme = useTheme()
   const [searchText, setSearchText] = useState(filters.search || '')
+
+  // Derive setup colors from theme: cycle through status palette for setups
+  const SETUP_COLORS = {
+    talking_head: theme.colors.status.new,
+    screen_recording: theme.colors.status.queued,
+    walk_and_talk: theme.colors.status.filming_today,
+    studio: theme.colors.status.filmed,
+    split_screen_react: theme.colors.accent,
+  }
 
   // Debounce search
   useEffect(() => {
@@ -232,7 +224,7 @@ function FilterBar({ filters, onFilterChange, ideas }) {
           <Pill
             key={s}
             $active={activeStatuses.includes(s)}
-            $color={STATUS_COLORS[s]}
+            $color={theme.colors.status[s]}
             onClick={() =>
               onFilterChange({ status: togglePill(filters.status, s) })
             }

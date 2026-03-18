@@ -162,14 +162,14 @@ def _parse_idea_detail(page: dict) -> dict:
         "caption_instagram": _get_text(props, "Caption Instagram"),
         "caption_youtube": _get_text(props, "Caption YouTube"),
         "caption_linkedin": _get_text(props, "Caption LinkedIn"),
-        "post_urls": [
-            url for url in [
-                _get_url(props, "Post URL TikTok"),
-                _get_url(props, "Post URL Instagram"),
-                _get_url(props, "Post URL YouTube"),
-                _get_url(props, "Post URL LinkedIn"),
-            ] if url
-        ],
+        "post_urls": {
+            k: v for k, v in {
+                "tiktok": _get_url(props, "Post URL TikTok"),
+                "instagram": _get_url(props, "Post URL Instagram"),
+                "youtube": _get_url(props, "Post URL YouTube"),
+                "linkedin": _get_url(props, "Post URL LinkedIn"),
+            }.items() if v
+        },
     })
     return idea
 
