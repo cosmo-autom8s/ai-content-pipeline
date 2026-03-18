@@ -1,6 +1,7 @@
 import styled, { keyframes } from 'styled-components'
 import { useIdeas } from './hooks/useIdeas'
 import Layout from './components/Layout'
+import FilterBar from './components/FilterBar'
 import IdeaCard from './components/IdeaCard'
 import IdeaDetail from './components/IdeaDetail'
 
@@ -66,11 +67,12 @@ function EmptyState() {
 }
 
 function App() {
-  const { ideas, stats, loading, error, selectIdea, selectedIdea, closeDetail } = useIdeas()
+  const { ideas, stats, loading, error, filters, updateFilters, selectIdea, selectedIdea, closeDetail } = useIdeas()
 
   return (
     <>
       <Layout stats={stats}>
+        <FilterBar filters={filters} onFilterChange={updateFilters} ideas={ideas} />
         {loading && <Spinner />}
         {error && <ErrorBanner message={error} />}
         <CardGrid>
