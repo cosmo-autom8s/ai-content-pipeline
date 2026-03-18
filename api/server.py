@@ -33,7 +33,7 @@ async def list_ideas(
     sort: str = "score",
     order: str = "desc",
     filming_setup: Optional[str] = None,
-    format: Optional[str] = None,
+    idea_format: Optional[str] = None,
     top_pick: Optional[str] = None,
     search: Optional[str] = None,
 ):
@@ -53,10 +53,10 @@ async def list_ideas(
         ]
 
     # 3. Format filter
-    if format:
+    if idea_format:
         ideas = [
             i for i in ideas
-            if i["format"] and i["format"].lower() == format.lower()
+            if i["format"] and i["format"].lower() == idea_format.lower()
         ]
 
     # 4. Top pick filter
@@ -80,13 +80,12 @@ async def list_ideas(
     def _sort_value(idea: dict):
         val = idea.get(sort_key)
         if val is None:
-            # Push None values to the end regardless of sort order
-            return (1, "")
+            return float('-inf') if reverse else float('inf')
         if isinstance(val, bool):
-            return (0, val)
+            return int(val)
         if isinstance(val, (int, float)):
-            return (0, val)
-        return (0, str(val).lower())
+            return val
+        return str(val).lower()
 
     ideas.sort(key=_sort_value, reverse=reverse)
 

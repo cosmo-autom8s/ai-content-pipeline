@@ -18,6 +18,11 @@ load_dotenv(env_path)
 NOTION_API_KEY = os.getenv("NOTION_API_KEY")
 NOTION_IDEAS_DB_ID = os.getenv("NOTION_IDEAS_DB_ID")
 
+if not NOTION_API_KEY:
+    raise EnvironmentError("NOTION_API_KEY is not set. Check your .env file.")
+if not NOTION_IDEAS_DB_ID:
+    raise EnvironmentError("NOTION_IDEAS_DB_ID is not set. Check your .env file.")
+
 NOTION_HEADERS = {
     "Authorization": f"Bearer {NOTION_API_KEY}",
     "Content-Type": "application/json",
@@ -49,16 +54,6 @@ def _get_select(props: dict, key: str) -> str | None:
     sel = prop.get("select")
     return sel["name"] if sel else None
 
-
-def _get_status(props: dict, key: str) -> str | None:
-    """Extract status value from a Notion status property.
-
-    Notion's 'status' type returns {"status": {"name": "..."}},
-    which is different from select.
-    """
-    prop = props.get(key, {})
-    status = prop.get("status")
-    return status["name"] if status else None
 
 
 def _get_multi_select(props: dict, key: str) -> list[str]:
@@ -101,12 +96,6 @@ def _get_relation(props: dict, key: str) -> list[str]:
     items = prop.get("relation", [])
     return [item["id"] for item in items]
 
-
-def _parse_post_urls(text: str) -> list[str]:
-    """Split newline-separated text into list of URL strings."""
-    if not text:
-        return []
-    return [line.strip() for line in text.strip().splitlines() if line.strip()]
 
 
 # ---------------------------------------------------------------------------

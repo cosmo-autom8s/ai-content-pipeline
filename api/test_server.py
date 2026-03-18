@@ -41,6 +41,7 @@ async def test_filter_by_status(client):
     resp = await client.get("/api/ideas?status=new")
     assert resp.status_code == 200
     data = resp.json()
+    assert len(data) > 0, "Expected at least one idea with status=new"
     for idea in data:
         assert idea["status"].lower() == "new"
 
@@ -49,6 +50,7 @@ async def test_filter_by_multi_status(client):
     resp = await client.get("/api/ideas?status=new,queued")
     assert resp.status_code == 200
     data = resp.json()
+    assert len(data) > 0, "Expected at least one idea with status=new or queued"
     for idea in data:
         assert idea["status"].lower() in {"new", "queued"}
 
@@ -57,8 +59,16 @@ async def test_sort_by_score_desc(client):
     resp = await client.get("/api/ideas?sort=score&order=desc")
     assert resp.status_code == 200
     data = resp.json()
+    assert len(data) > 0, "Expected at least one idea for sort test"
     scores = [i["score"] for i in data if i["score"] is not None]
     assert scores == sorted(scores, reverse=True)
+    # None scores must appear at the bottom, not the top
+    none_indices = [idx for idx, i in enumerate(data) if i["score"] is None]
+    scored_indices = [idx for idx, i in enumerate(data) if i["score"] is not None]
+    if none_indices and scored_indices:
+        assert min(none_indices) > max(scored_indices), (
+            "Ideas with None score should sort to the bottom in desc order"
+        )
 
 
 async def test_search_filter(client):
@@ -85,6 +95,7 @@ async def test_filter_top_picks(client):
     resp = await client.get("/api/ideas?top_pick=true")
     assert resp.status_code == 200
     data = resp.json()
+    assert len(data) > 0, "Expected at least one top pick idea"
     for idea in data:
         assert idea["top_pick"] is True
 
