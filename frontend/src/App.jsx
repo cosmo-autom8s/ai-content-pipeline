@@ -2,6 +2,7 @@ import styled, { keyframes } from 'styled-components'
 import { useIdeas } from './hooks/useIdeas'
 import Layout from './components/Layout'
 import IdeaCard from './components/IdeaCard'
+import IdeaDetail from './components/IdeaDetail'
 
 const CardGrid = styled.div`
   display: grid;
@@ -65,19 +66,24 @@ function EmptyState() {
 }
 
 function App() {
-  const { ideas, stats, loading, error, selectIdea } = useIdeas()
+  const { ideas, stats, loading, error, selectIdea, selectedIdea, closeDetail } = useIdeas()
 
   return (
-    <Layout stats={stats}>
-      {loading && <Spinner />}
-      {error && <ErrorBanner message={error} />}
-      <CardGrid>
-        {ideas.map((idea) => (
-          <IdeaCard key={idea.id} idea={idea} onClick={() => selectIdea(idea.id)} />
-        ))}
-      </CardGrid>
-      {ideas.length === 0 && !loading && <EmptyState />}
-    </Layout>
+    <>
+      <Layout stats={stats}>
+        {loading && <Spinner />}
+        {error && <ErrorBanner message={error} />}
+        <CardGrid>
+          {ideas.map((idea) => (
+            <IdeaCard key={idea.id} idea={idea} onClick={() => selectIdea(idea.id)} />
+          ))}
+        </CardGrid>
+        {ideas.length === 0 && !loading && <EmptyState />}
+      </Layout>
+      {selectedIdea && (
+        <IdeaDetail idea={selectedIdea} onClose={closeDetail} />
+      )}
+    </>
   )
 }
 
