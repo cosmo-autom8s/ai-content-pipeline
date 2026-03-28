@@ -121,20 +121,35 @@ def classify_link(link):
     prompt = load_prompt("prompts/classify_prompt.md")
     prompt = inject_context(prompt, link.transcript, link.caption)
 
+    # Truncate transcript to ~6000 words if needed (CLI input limit safety)
+    # Most short-form transcripts are <500 words; podcasts may hit this cap
+    prompt = truncate_transcript_in_prompt(prompt, max_words=6000)
+
     # Run Claude locally via CLI (Sonnet for speed)
+    # Pipe prompt via stdin to avoid ARG_MAX shell limits
     result = subprocess.run(
-        ["claude", "-m", "sonnet", "-p", prompt],
-        capture_output=True, text=True
+        ["claude", "-m", "sonnet", "-p", "-"],
+        input=prompt, capture_output=True, text=True
     )
 
-    parsed = json.loads(result.stdout)
+    # Parse JSON — strip markdown fences, validate structure
+    parsed = parse_classifier_output(result.stdout)
+    if parsed is None:
+        # Retry once on parse failure
+        result = subprocess.run(...)
+        parsed = parse_classifier_output(result.stdout)
+    if parsed is None:
+        # Mark as error, log, continue to next link
+        update_notion_status(link.page_id, "classification_error")
+        log_error(link.page_id, result.stdout)
+        return
 
     # Write tags + summary to Notion
     update_notion_tags(link.page_id, parsed["tags"])
     update_notion_summary(link.page_id, parsed["summary"])
     update_notion_status(link.page_id, "classified")
 
-    # Append insights to Obsidian knowledge files
+    # Append insights to Obsidian knowledge files (direct filesystem write)
     for tag in parsed["tags"]:
         if tag == "content_lesson":
             append_to_obsidian("content-principles.md", parsed["lesson"])
@@ -143,7 +158,26 @@ def classify_link(link):
         elif tag == "tool_discovery":
             append_to_obsidian("tool-library.md", parsed["tool"])
         # ... etc
+
+def parse_classifier_output(raw_output):
+    """Strip markdown fences, extract JSON, validate required fields."""
+    # Remove ```json ... ``` wrapping if present
+    # json.loads() the result
+    # Validate: must have "tags" (list) and "summary" (string)
+    # Return parsed dict or None on failure
 ```
+
+### Transcript Length Handling
+
+Short-form transcripts (TikTok, Reels, Shorts) are typically 100-500 words — no issue. Podcast transcripts can be 10,000+ words. The classifier truncates to ~6,000 words (fits comfortably in Sonnet's context with the prompt overhead). For podcasts, the first 6,000 words usually contain the core ideas; the classifier works with what's available.
+
+### Error Handling
+
+If classification fails (CLI error, JSON parse failure, Notion write failure):
+1. Retry once on JSON parse failure
+2. If still failing, set status to `classification_error` and log the raw output
+3. Orchestrator skips `classification_error` links on subsequent runs
+4. Can be retried manually via `/classify --retry-errors`
 
 ### Extraction Prompt Structure (Fabric-style)
 
@@ -216,12 +250,26 @@ print(f"Classification: {classified_count} links classified")
 
 ```
 pending → transcribed → classified → generate_ideas → processed → archived
-                                  ↘ learning | inspiration | postponed | other
+                    ↘                ↘ learning | inspiration | postponed | other
+              classification_error
+              (retryable via /classify --retry-errors)
 ```
+
+### Obsidian Write Mechanism
+
+The classifier uses **direct filesystem writes** to the vault path. This is simpler than MCP and works without Obsidian running. The vault path is configured in `.env`:
+
+```
+OBSIDIAN_VAULT_PATH=/Users/cosmo/Library/Mobile Documents/iCloud~md~obsidian/Documents/cosmo-vault
+```
+
+**iCloud sync risk:** Writing to an iCloud-synced file while it's syncing can cause conflicts. Mitigation: writes are append-only (no overwrites), entries are small, and the classifier runs at a predictable time (evening pipeline). If iCloud conflicts occur in practice, we can switch to writing a staging file locally and syncing via a separate step.
+
+Interactive skills (run during Claude Code sessions) access the vault via `kepano/obsidian-skills` MCP for richer read/search operations.
 
 ### Deduplication
 
-Before appending to Obsidian, check if the source URL already exists in the target file. If yes, skip. Prevents duplicate entries from re-runs.
+Before appending to Obsidian, check if the source URL already exists in the target file (simple grep). If yes, skip. Prevents duplicate entries from re-runs. This is sufficient for v1 — if files grow large over months, a JSON index file alongside each knowledge file may be needed.
 
 ---
 
@@ -235,8 +283,7 @@ cosmo-vault/content/
 ├── hook-bank.md             ← Opening lines by pattern type
 ├── tool-library.md          ← Tools discovered from videos
 ├── idea-backlog.md          ← Content ideas from saved videos
-├── workflows.md             ← Processes and workflows
-└── weekly-digest.md         ← Auto-generated weekly summary
+└── workflows.md             ← Processes and workflows
 ```
 
 ### Entry Formats
@@ -309,9 +356,22 @@ the bottleneck. The real bottleneck is nobody wrote down the process.
 | `/content-sparring` | All files |
 | Conversational mode | CLAUDE.md points to all files, read on demand |
 
+### Context Budget
+
+As knowledge files grow over months, they will eventually get large. Design constraint: skills that read knowledge files should read **recent entries only** (last 30 days or last N entries) rather than the full file. The entry format includes dates, making it easy to filter. If a file exceeds ~500 lines, older entries can be archived to a separate file (e.g., `content-principles-archive.md`). This does not need solving now but the date-stamped entry format ensures it's possible later.
+
 ---
 
 ## 5. Skills Layer
+
+### Skill Execution Model
+
+Skills are markdown prompt files that guide Claude's behavior during a conversation. They do NOT execute code themselves. When a skill needs data from Notion or needs to write to Notion, it instructs Claude to use one of two mechanisms:
+
+1. **Notion MCP** — Claude uses the Notion MCP server (already connected) for database queries and page updates. Skills include the database IDs and query instructions.
+2. **Python helper scripts** — For complex data gathering, a skill instructs Claude to run a Python script that returns structured data. Example: `python engines/ideation.py --list` to get queued links.
+
+This means: **skills are the brain (what to do, how to think), Python scripts are the hands (fetch data, write to APIs).**
 
 ### Skill Files
 
@@ -321,68 +381,50 @@ All skills live in `skills/` and follow the standard SKILL.md format.
 
 **File:** `skills/content-brief.md`
 
-**What it does:**
-1. Queries Notion: links saved since last brief, classified this week (by tag)
-2. Reads Obsidian: recent entries in all knowledge files
-3. Queries Notion: Content Ideas DB — queued, filming today
-4. Synthesizes into a brief:
-   - "You saved X videos this week. Y classified, Z waiting."
-   - 3 content ideas ranked by score + recency
-   - 1 principle you collected this week
-   - 1 tool worth mentioning in content
-   - Filming queue status
+**Execution pattern:** Skill instructs Claude to query Notion via MCP for link counts and idea status, then read Obsidian knowledge files for recent entries, then synthesize.
+
+**What it produces:**
+1. "You saved X videos this week. Y classified, Z waiting."
+2. 3 content ideas ranked by score + recency
+3. 1 principle you collected this week (from content-principles.md)
+4. 1 tool worth mentioning in content (from tool-library.md)
+5. Filming queue status
 
 #### `/classify`
 
 **File:** `skills/classify.md`
 
-**What it does:**
-Interactive wrapper around `engines/classifier.py`. Runs the classifier, shows results, lets you adjust tags before finalizing.
+**Execution pattern:** Skill instructs Claude to run `python engines/classifier.py` which handles the batch classification. Shows results, lets you adjust tags interactively via Notion MCP.
 
 #### `/ideate [optional topic or link]`
 
 **File:** `skills/ideate.md`
 
-**What it does:**
-1. If topic given: ideate freely on that topic
-   If no topic: query Notion for classified links tagged `content_idea`
-2. Reads `creator_context.md` + `content-principles.md` + `hook-bank.md`
-3. Runs the existing 4-skill pipeline (idea-gen → hooks → creative-director → de-AI-ify)
-4. Saves ideas to Content Ideas DB, marks source links as processed
+**Execution pattern:** Skill instructs Claude to run `python engines/ideation.py --list` to get queued links, then reads knowledge files for context, then runs the 4-skill ideation pipeline (which is conversational — Claude follows the pipeline instructions from `prompts/ideation_pipeline.md`), then saves results via `engines/ideation.py --save`.
 
-**Key difference from current ideation:** Knowledge files are injected as context. If you saved 5 videos about hook structures this week, the ideation engine knows those patterns.
+**Key difference from current ideation:** Knowledge files (`content-principles.md`, `hook-bank.md`) are injected as context before the pipeline runs. Ideas and hooks are informed by accumulated lessons.
 
 #### `/research [topic]`
 
 **File:** `skills/research.md`
 
-**What it does:**
-1. Takes a topic
-2. Spawns a research subagent (web search + GitHub search)
-3. Returns: key findings, relevant repos/tools, content angles
-4. Optionally: saves findings to relevant knowledge files
+**Execution pattern:** Conversational skill. Claude uses its built-in web search and Agent tool for research. No subagent framework needed — Claude Code already supports this natively. Optionally saves findings to knowledge files via direct file write.
 
 #### `/captions`
 
 **File:** `skills/captions.md`
 
-**What it does:**
-1. Queries Notion for filmed ideas
-2. Reads `creator_context.md` + `content-principles.md` + `hook-bank.md`
-3. Generates platform-specific captions (TikTok, IG, YouTube, LinkedIn)
-4. Saves to Notion
+**Execution pattern:** Skill instructs Claude to run `python engines/captions.py --list` to get filmed ideas, then reads `creator_context.md` + knowledge files for brand context, then generates captions conversationally, then saves via `engines/captions.py --save`.
 
-**Key difference from current captions:** Full brand context + knowledge file context injected. No more 17-line generic prompt.
+**Key difference from current captions:** Full brand context + knowledge file context injected. The existing `captions.py` stays as the Notion query/save layer. The skill replaces the thin `prompts/captions.txt` as the prompt that guides caption generation.
 
 #### `/content-sparring`
 
 **File:** `skills/content-sparring.md`
 
-**What it does:**
-1. Loads full context: `creator_context.md` + all knowledge files
-2. Enters structured creative discussion
-3. Pushes back on generic ideas, references collected principles and hooks
-4. No auto-save — conversational only
+**Execution pattern:** Pure conversational skill. Loads `creator_context.md` + all knowledge files as context. No Python scripts involved. Claude reads the files and enters creative discussion mode.
+- Pushes back on generic ideas, references collected principles and hooks
+- No auto-save — conversational only, you decide what to act on
 
 ### CLAUDE.md
 
@@ -439,8 +481,9 @@ You help him make better content by using what he's already collected.
 | File | Changes |
 |------|---------|
 | `orchestrator.py` | Add classifier step after extraction |
-| `engines/captions.py` | Inject `creator_context.md` + knowledge files |
-| `prompts/captions.txt` | Rewrite with full brand context |
+| `prompts/captions.txt` | Rewrite with full brand context (consumed by `skills/captions.md`) |
+
+Note: `engines/captions.py` stays as-is — it handles Notion queries and saves. The skill (`skills/captions.md`) replaces the thin prompt with knowledge-aware instructions. No Python changes needed for captions.
 
 ### Notion Changes
 
