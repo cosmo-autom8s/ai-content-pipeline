@@ -38,8 +38,8 @@ The current pipeline captures inputs (video links via Telegram, transcripts via 
 │  Talk, ask questions, run /commands                      │
 ├─────────────────────────────────────────────────────────┤
 │  SKILLS LAYER (markdown prompts)                         │
-│  /content-brief  /classify  /ideate  /research  /captions│
-│  /content-sparring                                       │
+│  /ca-brief  /ca-classify  /ca-ideate  /ca-research       │
+│  /ca-captions  /ca-sparring  /ca-help                    │
 │  Each skill reads from Notion + Obsidian knowledge files │
 ├─────────────────────────────────────────────────────────┤
 │  INFRASTRUCTURE LAYER (Python — mostly existing)         │
@@ -71,11 +71,12 @@ You send link to Telegram
        ├── Extracts insights per tag type
        └── Appends to Obsidian knowledge files
   → You interact with the Content Agent
-       ├── /content-brief — morning overview
-       ├── /ideate — generate ideas (with knowledge context)
-       ├── /research — explore a topic
-       ├── /captions — generate captions (with brand context)
-       ├── /content-sparring — creative discussion
+       ├── /ca-brief — morning overview
+       ├── /ca-ideate — generate ideas (with knowledge context)
+       ├── /ca-research — explore a topic
+       ├── /ca-captions — generate captions (with brand context)
+       ├── /ca-sparring — creative discussion
+       ├── /ca-help — what the agent does and how to use it
        └── Just talk — conversational, knowledge-informed
 ```
 
@@ -89,6 +90,10 @@ You send link to Telegram
 | Parallel subagents | zubair-trabzada/ai-marketing-claude | Fan out for research, fan in results |
 | Human-in-the-loop gate | langchain-ai/social-media-agent | AI generates, you approve |
 | Obsidian vault access | kepano/obsidian-skills | Official vault read/write skills |
+
+### Skill Naming Convention
+
+All Content Agent skills use the `/ca-` prefix (Content Agent) for easy identification and tab-completion. Run `/ca-help` for an overview of all available commands.
 
 ---
 
@@ -178,7 +183,7 @@ If classification fails (CLI error, JSON parse failure, Notion write failure):
 1. Retry once on JSON parse failure
 2. If still failing, set status to `classification_error` and log the raw output
 3. Orchestrator skips `classification_error` links on subsequent runs
-4. Can be retried manually via `/classify --retry-errors`
+4. Can be retried manually via `/ca-classify --retry-errors`
 
 ### Extraction Prompt Structure (Fabric-style)
 
@@ -351,10 +356,10 @@ the bottleneck. The real bottleneck is nobody wrote down the process.
 
 | Context | Files Read |
 |---------|-----------|
-| `/content-brief` | All files (recent entries only) |
-| `/ideate` | `content-principles.md`, `hook-bank.md`, `idea-backlog.md` |
-| `/captions` | `content-principles.md`, `hook-bank.md` |
-| `/content-sparring` | All files |
+| `/ca-brief` | All files (recent entries only) |
+| `/ca-ideate` | `content-principles.md`, `hook-bank.md`, `idea-backlog.md` |
+| `/ca-captions` | `content-principles.md`, `hook-bank.md` |
+| `/ca-sparring` | All files |
 | Conversational mode | CLAUDE.md points to all files, read on demand |
 
 ### Context Budget
@@ -378,9 +383,21 @@ This means: **skills are the brain (what to do, how to think), Python scripts ar
 
 All skills live in `skills/` and follow the standard SKILL.md format.
 
-#### `/content-brief`
+#### `/ca-help`
 
-**File:** `skills/content-brief.md`
+**File:** `skills/ca-help.md`
+
+**Execution pattern:** Pure informational skill. No data queries, no Python. Displays a clear overview of the Content Agent: what it is, what each skill does, example usage for each command, and tips for getting the most out of it. Think of it as the agent's README.
+
+**What it shows:**
+- One-line description of the Content Agent
+- Table of all `/ca-*` commands with description and example usage
+- Quick tips (e.g., "Just talk to me without a slash command for freeform sparring")
+- Where knowledge files live and what they contain
+
+#### `/ca-brief`
+
+**File:** `skills/ca-brief.md`
 
 **Execution pattern:** Skill instructs Claude to query Notion via MCP for link counts and idea status, then read Obsidian knowledge files for recent entries, then synthesize.
 
@@ -391,37 +408,37 @@ All skills live in `skills/` and follow the standard SKILL.md format.
 4. 1 tool worth mentioning in content (from tool-library.md)
 5. Filming queue status
 
-#### `/classify`
+#### `/ca-classify`
 
-**File:** `skills/classify.md`
+**File:** `skills/ca-classify.md`
 
 **Execution pattern:** Skill instructs Claude to run `python engines/classifier.py` which handles the batch classification. Shows results, lets you adjust tags interactively via Notion MCP. Supports `python engines/classifier.py --retry-errors` to re-attempt previously failed classifications.
 
-#### `/ideate [optional topic or link]`
+#### `/ca-ideate [optional topic or link]`
 
-**File:** `skills/ideate.md`
+**File:** `skills/ca-ideate.md`
 
 **Execution pattern:** Skill instructs Claude to run `python engines/ideation.py --list` to get queued links, then reads knowledge files for context, then runs the 4-skill ideation pipeline (which is conversational — Claude follows the pipeline instructions from `prompts/ideation_pipeline.md`), then saves results via `engines/ideation.py --save`.
 
 **Key difference from current ideation:** Knowledge files (`content-principles.md`, `hook-bank.md`) are injected as context before the pipeline runs. Ideas and hooks are informed by accumulated lessons.
 
-#### `/research [topic]`
+#### `/ca-research [topic]`
 
-**File:** `skills/research.md`
+**File:** `skills/ca-research.md`
 
 **Execution pattern:** Conversational skill. Claude uses its built-in web search and Agent tool for research. No subagent framework needed — Claude Code already supports this natively. Optionally saves findings to knowledge files via direct file write.
 
-#### `/captions`
+#### `/ca-captions`
 
-**File:** `skills/captions.md`
+**File:** `skills/ca-captions.md`
 
 **Execution pattern:** Skill instructs Claude to run `python engines/captions.py --list` to get filmed ideas, then reads `creator_context.md` + knowledge files for brand context, then generates captions conversationally, then saves via `engines/captions.py --save`.
 
 **Key difference from current captions:** Full brand context + knowledge file context injected. The existing `captions.py` stays as the Notion query/save layer. The skill replaces the thin `prompts/captions.txt` as the prompt that guides caption generation.
 
-#### `/content-sparring`
+#### `/ca-sparring`
 
-**File:** `skills/content-sparring.md`
+**File:** `skills/ca-sparring.md`
 
 **Execution pattern:** Pure conversational skill. Loads `creator_context.md` + all knowledge files as context. No Python scripts involved. Claude reads the files and enters creative discussion mode.
 - Pushes back on generic ideas, references collected principles and hooks
@@ -448,7 +465,7 @@ You help him make better content by using what he's already collected.
 - [vault]/content/workflows.md — processes worth copying
 
 ## Slash Commands
-/content-brief, /classify, /ideate, /research, /captions, /content-sparring
+/ca-help, /ca-brief, /ca-classify, /ca-ideate, /ca-research, /ca-captions, /ca-sparring
 
 ## Behavior
 - Lead with what's actionable
@@ -470,12 +487,13 @@ You help him make better content by using what he's already collected.
 | `CLAUDE.md` | Project brain — context, commands, behavior |
 | `engines/classifier.py` | Classification engine |
 | `prompts/classify_prompt.md` | Fabric-style extraction prompt |
-| `skills/content-brief.md` | Morning brief skill |
-| `skills/classify.md` | Classification skill |
-| `skills/ideate.md` | Ideation skill |
-| `skills/research.md` | Research skill |
-| `skills/captions.md` | Upgraded captions skill |
-| `skills/content-sparring.md` | Creative discussion skill |
+| `skills/ca-help.md` | Agent overview and skill usage guide |
+| `skills/ca-brief.md` | Morning brief skill |
+| `skills/ca-classify.md` | Classification skill |
+| `skills/ca-ideate.md` | Ideation skill |
+| `skills/ca-research.md` | Research skill |
+| `skills/ca-captions.md` | Upgraded captions skill |
+| `skills/ca-sparring.md` | Creative discussion skill |
 
 ### Modified Files
 
