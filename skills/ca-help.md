@@ -10,13 +10,12 @@ I'm your Content Agent — a sparring partner for content creation that gets sma
 | Command | What it does | Example |
 |---|---|---|
 | `/ca-help` | Show this help reference | `/ca-help` |
-| `/ca-brief` | Generate a daily content brief from your backlog and trending topics | `/ca-brief` |
+| `/ca-brief` | Morning brief — pipeline status, top ideas, recent knowledge | `/ca-brief` |
 | `/ca-classify` | Run the classifier on transcribed links — auto-tag and extract insights | `/ca-classify` |
-| `/ca-captions` | Generate captions for a piece of content after filming | `/ca-captions` |
-| `/ca-hooks` | Generate hook variations for an idea using your hook bank | `/ca-hooks "productivity myth everyone believes"` |
-| `/ca-score` | Score an idea against your content principles | `/ca-score` |
-| `/ca-backlog` | Review and triage your idea backlog | `/ca-backlog` |
-| `/ca-repurpose` | Turn one piece of content into multiple formats | `/ca-repurpose` |
+| `/ca-ideate` | Generate content ideas from queued links or a topic | `/ca-ideate` or `/ca-ideate AI automation for dentists` |
+| `/ca-research` | Research a topic, save findings to knowledge files | `/ca-research AI content agents` |
+| `/ca-captions` | Generate platform captions for filmed content ideas | `/ca-captions` |
+| `/ca-sparring` | Creative discussion mode — push back on weak ideas, reference knowledge | `/ca-sparring` |
 
 ## Quick Tips
 
