@@ -127,9 +127,10 @@ def classify_link(link):
 
     # Run Claude locally via CLI (Sonnet for speed)
     # Pipe prompt via stdin to avoid ARG_MAX shell limits
+    # Timeout prevents hung calls from blocking the orchestrator
     result = subprocess.run(
         ["claude", "-m", "sonnet", "-p", "-"],
-        input=prompt, capture_output=True, text=True
+        input=prompt, capture_output=True, text=True, timeout=120
     )
 
     # Parse JSON — strip markdown fences, validate structure
@@ -250,9 +251,9 @@ print(f"Classification: {classified_count} links classified")
 
 ```
 pending → transcribed → classified → generate_ideas → processed → archived
-                    ↘                ↘ learning | inspiration | postponed | other
-              classification_error
-              (retryable via /classify --retry-errors)
+              ↓              ↘ learning | inspiration | postponed | other
+        classification_error
+        (retryable via /classify --retry-errors)
 ```
 
 ### Obsidian Write Mechanism
@@ -269,7 +270,7 @@ Interactive skills (run during Claude Code sessions) access the vault via `kepan
 
 ### Deduplication
 
-Before appending to Obsidian, check if the source URL already exists in the target file (simple grep). If yes, skip. Prevents duplicate entries from re-runs. This is sufficient for v1 — if files grow large over months, a JSON index file alongside each knowledge file may be needed.
+Before appending to Obsidian, check if the source URL already exists in the target file (simple grep on `**Source URL:**` lines). If yes, skip. Prevents duplicate entries from re-runs. Known limitation: if the same insight appears from two different source URLs, both get added (which is acceptable — different sources, potentially different framing). This is sufficient for v1 — if files grow large over months, a JSON index file alongside each knowledge file may be needed.
 
 ---
 
@@ -394,7 +395,7 @@ All skills live in `skills/` and follow the standard SKILL.md format.
 
 **File:** `skills/classify.md`
 
-**Execution pattern:** Skill instructs Claude to run `python engines/classifier.py` which handles the batch classification. Shows results, lets you adjust tags interactively via Notion MCP.
+**Execution pattern:** Skill instructs Claude to run `python engines/classifier.py` which handles the batch classification. Shows results, lets you adjust tags interactively via Notion MCP. Supports `python engines/classifier.py --retry-errors` to re-attempt previously failed classifications.
 
 #### `/ideate [optional topic or link]`
 
@@ -514,7 +515,7 @@ Handle in a separate Claude Code session before or in parallel:
 4. **Optional:** Install `obsidian-smart-connections` for semantic search
 5. **Optional:** Review `COG-second-brain` (github.com/huytieu/COG-second-brain) and `second-brain-skills` (github.com/coleam00/second-brain-skills) for vault structure inspiration
 
-**Fallback:** If Obsidian isn't ready, classifier stores knowledge files locally in `content-pipeline-bot/knowledge/` until vault access is configured.
+**Fallback:** If Obsidian isn't ready, the `append_to_obsidian()` function reads the vault path from `.env` (`OBSIDIAN_VAULT_PATH`). If the env var is unset or the path doesn't exist, it falls back to writing knowledge files locally in `content-pipeline-bot/knowledge/` until vault access is configured.
 
 ---
 
