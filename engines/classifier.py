@@ -322,7 +322,7 @@ def classify_link(link, dry_run=False):
     try:
         # Pipe prompt via stdin to avoid ARG_MAX
         result = subprocess.run(
-            ["claude", "-m", "sonnet", "-p", "-"],
+            ["claude", "--model", "sonnet", "-p", "-"],
             input=prompt, capture_output=True, text=True, timeout=120
         )
     except subprocess.TimeoutExpired:
@@ -342,7 +342,7 @@ def classify_link(link, dry_run=False):
         # Retry once
         try:
             result = subprocess.run(
-                ["claude", "-m", "sonnet", "-p", "-"],
+                ["claude", "--model", "sonnet", "-p", "-"],
                 input=prompt, capture_output=True, text=True, timeout=120
             )
             parsed = parse_classifier_output(result.stdout)
@@ -374,10 +374,20 @@ def classify_link(link, dry_run=False):
     }
     # news is not persisted. inspiration takeaway is in AI Summary only.
 
+    # Map tag names to JSON keys in Claude's output
+    tag_to_json_key = {
+        "content_lesson": "lesson",
+        "hook_pattern": "hooks",
+        "tool_discovery": "tool",
+        "content_idea": "idea",
+        "workflow": "workflow",
+    }
+
     for tag in tags:
-        if tag in tag_to_file and tag in parsed:
+        json_key = tag_to_json_key.get(tag)
+        if tag in tag_to_file and json_key and json_key in parsed:
             file_path = knowledge_dir / tag_to_file[tag]
-            entry = format_obsidian_entry(tag, parsed[tag])
+            entry = format_obsidian_entry(tag, parsed[json_key])
             if entry:
                 appended = append_to_knowledge_file(file_path, entry)
                 if appended:
