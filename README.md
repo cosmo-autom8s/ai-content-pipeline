@@ -1,10 +1,10 @@
 # Autom8Lab Content Engine
 
-**Version:** 2.0.0
-**Last updated:** 2026-03-29
+**Version:** 2.1.0
+**Last updated:** 2026-03-31
 **Phase:** 2 — Content Agent (Conversational Sparring Partner)
 
-Turn raw video links (sent via Telegram) into actionable content ideas overnight, with caption generation after filming. Now upgraded with a Content Agent layer — a conversational sparring partner that knows your brand, your backlog, and your principles.
+Turn raw video links (sent via Telegram) into classified knowledge, actionable content ideas, and platform-ready captions — with a conversational Content Agent that knows your brand, your backlog, and your principles. The agent gets smarter over time through 9 Obsidian knowledge files that compound across sessions.
 
 ---
 
@@ -23,8 +23,14 @@ Evening Pipeline (orchestrator.py)
   ├── YouTube Extractor ── auto-transcribes podcasts, YT shorts, long-form + descriptions
   ├── Spotify Converter ── finds YouTube version of Spotify podcasts
   ├── TokScript Parser ─── parses CSV exports for TikTok/IG transcripts + captions
-  └── Classifier ────────── auto-tags links with topic, format, and angle signals
-  |
+  └── Classifier v2 ────── auto-tags with non-exclusive knowledge tags + writes to Obsidian
+  |                         (ai_knowledge, business_knowledge, content_lesson, hook_pattern,
+  |                          tool_discovery, content_idea, workflow, knowledge_nugget, news)
+  v
+Obsidian Knowledge Files (auto-populated, deduplicated)
+  |  ai-knowledge.md, business-knowledge.md, content-principles.md,
+  |  hook-bank.md, tool-library.md, idea-backlog.md, workflows.md,
+  |  knowledge-nuggets.md, news.md
   v
 Links Queue (status: classified)
   |
@@ -37,7 +43,7 @@ Ideation Pipeline (4-skill process via Claude Code)
   |  content-idea-generator → viral-hook-creator → creative-director → de-ai-ify
   |  5 ideas per video, 5 hooks per idea, scored and ranked
   v
-Content Ideas DB (Notion)
+Content Ideas DB (Notion) ──> Dashboard (localhost:8088)
   |
   v  You film it, then...
   |
@@ -51,7 +57,7 @@ You post it
 
 ## Content Agent
 
-The Content Agent is an upgrade from a capture-and-process tool into a conversational content sparring partner. Instead of just running scripts, you can now open a Claude Code session and talk through ideas, get a morning brief, run classification interactively, or spar on hooks and angles — all with context from your Notion backlog, your brand principles, and your knowledge files. The agent gets smarter over time as your knowledge files grow: every principle, proven hook, and tool reference you add makes future briefs, ideation, and sparring sessions more grounded in your actual thinking.
+The Content Agent is an upgrade from a capture-and-process tool into a conversational content sparring partner. Instead of just running scripts, you can open a Claude Code session and talk through ideas, get a morning brief, run classification interactively, or spar on hooks and angles — all grounded in your Notion backlog, brand principles, and 9 knowledge files. Every classified video automatically enriches the knowledge files, making future briefs, ideation, and sparring sessions more informed.
 
 ### `/ca-*` Commands
 
@@ -59,38 +65,99 @@ The Content Agent is an upgrade from a capture-and-process tool into a conversat
 |---------|-------------|
 | `/ca-help` | Show all Content Agent commands and usage tips |
 | `/ca-brief` | Morning content brief — pipeline status, top ideas, one principle, one tool |
-| `/ca-classify` | Run the classifier on transcribed links — auto-tag with topic, format, and angle signals |
+| `/ca-classify` | Run the classifier on transcribed links — auto-tag and extract to knowledge files |
 | `/ca-ideate` | Generate content ideas from queued links or a freeform topic, informed by knowledge files |
 | `/ca-research` | Research a topic for content angles — search web, save findings to knowledge files |
 | `/ca-captions` | Generate platform-ready captions after filming, using your voice and brand principles |
 | `/ca-sparring` | Creative discussion mode — push back on weak ideas, reference your knowledge and principles |
 
-### Daily Workflow (with Content Agent)
+### Daily Workflow
 
 | When | What | How |
 |------|------|-----|
 | Morning | Get a content brief | `/ca-brief` in Claude Code — pipeline status, top 3 ideas to film, one principle, one tool |
 | During the day | Save links | Send to Telegram bot |
-| During the day | Freeform ideation or hook refinement | `/ca-sparring` or `/ca-research` in Claude Code — no scripts needed |
+| During the day | Freeform ideation or hook refinement | `/ca-sparring` or `/ca-research` in Claude Code |
 | Evening | Export TikToks/Reels | TokScript: paste links → export CSV → drop in `csv_inbox/` |
-| Evening | Run pipeline | `python orchestrator.py` — now includes auto-classification after extraction |
+| Evening | Run pipeline | `python orchestrator.py` — extracts transcripts + classifies + writes to Obsidian |
 | Evening | Triage links | In Notion, set each classified link to `generate_ideas`, `learning`, `inspiration`, `postponed`, or `other` |
-| Evening | Generate ideas | `python engines/ideation.py` in Claude Code (or `/ca-ideate`) |
+| Evening | Generate ideas | `python engines/ideation.py` or `/ca-ideate` |
+| Evening | Review ideas | Dashboard at `localhost:8088` — filter, sort, score, review |
 | After filming | Generate captions | `/ca-captions` in Claude Code |
 | After filming | Post content | Copy captions from Notion, post manually |
 
-### Knowledge Files
+---
 
-Knowledge files are the Content Agent's long-term memory. They capture your content principles, proven hooks, tools you reference, and raw ideas — and they're read automatically by `/ca-brief`, `/ca-ideate`, and `/ca-sparring` to ground responses in your actual thinking rather than generic best practices.
+## Classifier v2 — Knowledge Extraction
 
-**Where they live:** `$OBSIDIAN_VAULT_PATH/content/` (Obsidian vault, synced across devices) with a local fallback at `knowledge/` in this repo. The agent tries the Obsidian path first and falls back silently if the file doesn't exist yet.
+The classifier reads each transcribed video and produces structured extractions across 9 non-exclusive tag types. "Non-exclusive" means a single video about AI sales funnels can simultaneously produce:
 
-| File | What it contains |
-|------|-----------------|
-| `content-principles.md` | Your core beliefs about content — what you stand for, what you avoid, your POV |
-| `hook-bank.md` | Proven hook structures and examples from your best-performing content |
-| `tool-library.md` | Tools, frameworks, and systems you reference in your content |
-| `idea-backlog.md` | Raw ideas, half-formed thoughts, and topics you want to explore |
+- **ai_knowledge** → technical implementation framed for a practitioner
+- **business_knowledge** → strategy framed for a business owner
+- **content_lesson** → principle framed for a content creator
+
+Each extraction is written to its own Obsidian knowledge file with `#tags` for cross-referencing.
+
+### Tag Types
+
+| Tag | JSON Key | Obsidian File | What it captures |
+|-----|----------|---------------|-----------------|
+| `content_lesson` | `lesson` | `content-principles.md` | Teachable content creation principles |
+| `hook_pattern` | `hooks` | `hook-bank.md` | Strong opening hooks with named patterns |
+| `tool_discovery` | `tool` | `tool-library.md` | AI tools and software worth knowing |
+| `content_idea` | `idea` | `idea-backlog.md` | Filmable content ideas with angles |
+| `workflow` | `workflow` | `workflows.md` | Repeatable processes and systems |
+| `ai_knowledge` | `ai_knowledge` | `ai-knowledge.md` | Technical AI knowledge for practitioners |
+| `business_knowledge` | `business_knowledge` | `business-knowledge.md` | Business strategy and operations insights |
+| `knowledge_nugget` | `knowledge_nugget` | `knowledge-nuggets.md` | Psychology, economics, mental models |
+| `news` | `news_item` | `news.md` | Time-sensitive industry news (date-stamped) |
+| `inspiration` | — | — | Tag-only, no extraction |
+
+### Deduplication
+
+- **URL-based:** Same source URL won't be written twice to any file
+- **Heading-based:** Same `## Tool Name` heading won't be duplicated (prevents duplicate tool entries from different sources)
+
+### Obsidian Tags
+
+Every extracted entry includes `#tags` for Obsidian cross-referencing:
+- Tool/product names: `#Claude`, `#Manus`, `#Descript`
+- Topic keywords: `#sales`, `#lead-gen`, `#content-strategy`
+- Source format: `#short-form`, `#podcast`, `#long-form`
+
+---
+
+## Knowledge Files
+
+Knowledge files are the Content Agent's long-term memory. They're auto-populated by the classifier and read by `/ca-brief`, `/ca-ideate`, `/ca-sparring`, and `/ca-research` to ground responses in accumulated insights rather than generic best practices.
+
+**Primary location:** `$OBSIDIAN_VAULT_PATH/content/` (Obsidian vault, synced across devices)
+**Fallback location:** `knowledge/` (local dir in this repo)
+
+| File | What it contains | Populated by |
+|------|-----------------|--------------|
+| `content-principles.md` | Content creation lessons — what works, what doesn't | Classifier (`content_lesson`) |
+| `hook-bank.md` | Proven hook structures with named patterns | Classifier (`hook_pattern`) |
+| `tool-library.md` | AI and ops tools with use cases and links | Classifier (`tool_discovery`) |
+| `idea-backlog.md` | Filmable content ideas with angles | Classifier (`content_idea`) |
+| `workflows.md` | Repeatable processes and systems | Classifier (`workflow`) |
+| `ai-knowledge.md` | Technical AI knowledge for practitioners | Classifier (`ai_knowledge`) |
+| `business-knowledge.md` | Business strategy, sales, ops insights | Classifier (`business_knowledge`) |
+| `knowledge-nuggets.md` | Psychology, economics, mental models | Classifier (`knowledge_nugget`) |
+| `news.md` | Time-sensitive industry news (date-stamped) | Classifier (`news`) |
+
+---
+
+## Dashboard
+
+A React + FastAPI dashboard for reviewing content ideas at `localhost:8088`.
+
+- Filter by status, format, and score
+- Sort by score, date, or filming priority
+- Search across idea titles and descriptions
+- Slide-out detail panel with hooks, scoring, and captions
+
+Start with: `./run.sh` (builds frontend + starts FastAPI server)
 
 ---
 
@@ -114,6 +181,7 @@ cp .env.example .env
 #   NOTION_API_KEY
 #   NOTION_LINKS_DB_ID
 #   NOTION_IDEAS_DB_ID
+#   OBSIDIAN_VAULT_PATH  (path to your Obsidian vault)
 ```
 
 ### 3. Run the Telegram bot
@@ -130,7 +198,13 @@ python orchestrator.py --dry-run # Preview what would be processed
 python orchestrator.py --status  # Show current queue counts
 ```
 
-### 5. Run extractors individually (optional)
+### 5. Run the dashboard
+
+```bash
+./run.sh                         # Builds frontend + starts API on port 8088
+```
+
+### 6. Run extractors individually (optional)
 
 ```bash
 python extractors/youtube.py                # Transcribe all pending YouTube links
@@ -144,7 +218,7 @@ python extractors/spotify_to_youtube.py URL      # Convert a single Spotify URL
 python extractors/spotify_to_youtube.py --dry-run # Preview pending Spotify links
 ```
 
-### 6. Run the classifier (optional, runs automatically in orchestrator)
+### 7. Run the classifier (optional, runs automatically in orchestrator)
 
 ```bash
 python engines/classifier.py                # Classify all transcribed links
@@ -153,7 +227,7 @@ python engines/classifier.py --id PAGE_ID   # Classify a specific link
 python engines/classifier.py --dry-run      # Preview what would be classified
 ```
 
-### 7. Run ideation pipeline (via Claude Code)
+### 8. Run ideation pipeline (via Claude Code)
 
 ```bash
 python engines/ideation.py                  # Pipeline mode (default): 4-skill ideation
@@ -162,7 +236,7 @@ python engines/ideation.py --id PAGE_ID     # Process a specific link
 python engines/ideation.py --legacy         # Legacy single-shot prompt mode
 ```
 
-### 8. Run captions (via Claude Code)
+### 9. Run captions (via Claude Code)
 
 ```bash
 python engines/captions.py --list           # List filmed ideas ready for captions
@@ -204,28 +278,25 @@ python engines/captions.py --id PAGE_ID     # Generate captions for a specific i
 
 ### Links Queue
 
-Inbox of raw content links. Each link has a URL, category, notes, status, and (after extraction) transcript, original caption/description, and metadata. After classification, each link also has auto-tagged topic, format, and angle signals.
+Inbox of raw content links. Each link has a URL, category, notes, status, and (after extraction) transcript, original caption/description, and metadata. After classification, each link gets non-exclusive content tags and an AI summary.
+
+**Content Tags (multi-select):** `content_idea`, `content_lesson`, `hook_pattern`, `tool_discovery`, `workflow`, `ai_knowledge`, `business_knowledge`, `knowledge_nugget`, `news`, `inspiration`
 
 **Statuses:** `pending` > `transcribed` > `classified` > `generate_ideas` > `processed` > `archived` | `postponed` | `learning` | `inspiration` | `other` | `converted` (Spotify > YouTube)
 
-**Views:** All Links, Short Form, Podcasts, Carousels, LinkedIn, X Posts, Reddit
-
 ### Content Ideas
 
-Generated ideas linked back to source material. Each idea has a short title (Name), a description, an angle, 5 hooks, format, urgency, score, filming setup, filming priority, and (after filming) platform-specific captions.
+Generated ideas linked back to source material. Each idea has a short title, description, angle, 5 hooks, format, urgency, score, filming setup, filming priority, and (after filming) platform-specific captions.
 
 **Key fields:**
-- **Name** — Short punchy title for the idea (e.g. "You Don't Need AI Agents. You Need a Checklist First.")
-- **Description** — 2-3 sentence explanation of the idea angle
+- **Name** — Short punchy title (e.g. "You Don't Need AI Agents. You Need a Checklist First.")
 - **Hook 1-5** — 5 viral hooks per idea using proven patterns (authority, contrarian, data, story, cautionary)
 - **Score** — Creative director score (1-10) for idea quality
 - **Top Pick** — Checkbox for the #1 idea from each batch
-- **Filming Setup** — Multi-select: `talking_head`, `screen_recording`, `walk_and_talk`, `studio`, `split_screen_react`
+- **Filming Setup** — `talking_head`, `screen_recording`, `walk_and_talk`, `studio`, `split_screen_react`
 - **Filming Priority** — `film_now` (red), `film_soon` (orange), `batch_next` (blue), `shelved` (gray)
 
 **Statuses:** `new` > `queued` > `filming_today` > `filmed` > `captioned` > `posted` > `archived`
-
-**Views:** Morning Menu (sorted by score), Filming Today, Ready to Post, Posted (Last 7 Days), Archive
 
 ---
 
@@ -233,10 +304,11 @@ Generated ideas linked back to source material. Each idea has a short title (Nam
 
 ```
 content-pipeline-bot/
-├── .env                              # Secrets (Telegram + Notion tokens + DB IDs)
+├── .env                              # Secrets (Telegram + Notion tokens + DB IDs + Obsidian path)
 ├── .env.example                      # Template for .env
 ├── requirements.txt                  # Python dependencies
 ├── README.md                         # This file
+├── CLAUDE.md                         # Content Agent project brain (read by Claude Code on startup)
 ├── CONTENT_ENGINE_PLAN.md            # Build plan + backlog + session continuity doc
 │
 ├── bot/                              # Telegram bot (always running)
@@ -245,13 +317,24 @@ content-pipeline-bot/
 │
 ├── extractors/                       # Transcript extraction tools
 │   ├── youtube.py                    # YouTube transcripts + descriptions via youtube-transcript-api + yt-dlp
-│   ├── tokscript_parser.py           # TokScript CSV parser for TikTok/IG transcripts + captions (with retry logic)
+│   ├── tokscript_parser.py           # TokScript CSV parser for TikTok/IG transcripts + captions
 │   └── spotify_to_youtube.py         # Spotify podcast > YouTube URL converter
 │
-├── engines/                          # Pipeline scripts + Content Agent core
+├── engines/                          # Pipeline engines
+│   ├── classifier.py                 # Classifier v2: non-exclusive tags, knowledge extraction, Obsidian writes
 │   ├── ideation.py                   # 4-skill ideation pipeline (or --legacy for single-shot)
-│   ├── captions.py                   # Filmed idea > platform captions
-│   └── classifier.py                 # Auto-classification engine — topic, format, angle signals
+│   └── captions.py                   # Filmed idea > platform captions
+│
+├── prompts/                          # Prompt templates + brand guidelines
+│   ├── classify_prompt.md            # Classifier prompt — 9 tag types, non-exclusive extraction
+│   ├── creator_context.md            # Compact brand context (positioning, ICP, voice, pillars)
+│   ├── ideation_pipeline.md          # 4-skill pipeline instructions
+│   ├── brand_identity.md             # Full brand identity: mission, values, service areas
+│   ├── brand_voice.md                # Voice & language rules, niche language banks
+│   ├── brand_content_strategy.md     # Content strategy: funnel, pillars, frames, CTAs
+│   ├── captions.txt                  # Caption prompt template
+│   ├── ideation.txt                  # Legacy single-shot ideation prompt
+│   └── ideation_legacy.txt           # Backup of original ideation prompt
 │
 ├── skills/                           # Claude Code /ca-* skill definitions
 │   ├── ca-help.md                    # Show all commands and usage tips
@@ -262,36 +345,26 @@ content-pipeline-bot/
 │   ├── ca-captions.md                # Captions after filming
 │   └── ca-sparring.md                # Creative discussion and pushback mode
 │
-├── knowledge/                        # Local fallback for knowledge files (Obsidian preferred)
-│   ├── content-principles.md         # Core content beliefs and POV
-│   ├── hook-bank.md                  # Proven hook structures and examples
-│   ├── tool-library.md               # Tools and frameworks referenced in content
-│   └── idea-backlog.md               # Raw ideas and half-formed thoughts
+├── api/                              # FastAPI backend (port 8088)
+│   ├── server.py                     # API routes for dashboard
+│   ├── notion.py                     # Notion database operations
+│   └── test_server.py               # API tests
 │
-├── prompts/                          # Prompt templates + brand guidelines
-│   ├── ideation_pipeline.md          # 4-skill pipeline instructions (default)
-│   ├── classify_prompt.md            # Classifier prompt — topic, format, angle extraction
-│   ├── creator_context.md            # Compact brand context for ideation (positioning, ICP, voice, pillars)
-│   ├── brand_identity.md             # Full brand identity: mission, values, service areas
-│   ├── brand_voice.md                # Voice & language rules, translations, niche language banks
-│   ├── brand_content_strategy.md     # Content strategy: funnel, pillars, frames, founder voice, CTAs
-│   ├── ideation.txt                  # Legacy single-shot ideation prompt
-│   ├── ideation_legacy.txt           # Backup of original ideation prompt
-│   └── captions.txt                  # Caption prompt template
+├── frontend/                         # React + Vite dashboard
+│   ├── src/                          # Components: App, Layout, IdeaCard, IdeaDetail, FilterBar
+│   ├── dist/                         # Built output
+│   └── vite.config.js               # Vite config (proxies /api to port 8088)
+│
+├── knowledge/                        # Local fallback for Obsidian knowledge files
+│
+├── tests/                            # Test suite
+│   └── test_classifier.py            # 27 tests: parsing, formatting, dedup, all tag types
 │
 ├── orchestrator.py                   # Evening pipeline (CSV + YouTube + classification + summary)
+├── run.sh                            # Single-command startup (builds frontend + starts API)
 ├── csv_inbox/                        # Drop TokScript CSVs here
 │   └── processed/                    # Processed CSVs moved here automatically
 ├── links/                            # Text file backups (legacy, still written to)
-│   ├── pending_tiktoks.txt
-│   ├── pending_reels.txt
-│   ├── pending_yt_shorts.txt
-│   ├── pending_carousels.txt
-│   ├── pending_podcasts.txt
-│   ├── pending_x.txt
-│   ├── pending_linkedin.txt
-│   └── pending_reddit.txt
-│
 ├── migrate_links.py                  # One-time migration script (already run)
 └── upload_to_notion.py               # Legacy TokScript uploader (deprecated)
 ```
@@ -301,13 +374,16 @@ content-pipeline-bot/
 ## Tech Stack
 
 - **Python 3.9+** with `python-telegram-bot>=20.0`
+- **React + Vite** dashboard for idea review
+- **FastAPI** backend serving the dashboard API (port 8088)
 - **Notion API** (REST) for database reads/writes from bot + scripts
 - **Notion MCP** for database creation, views, bulk operations via Claude Code
+- **Obsidian** for knowledge file storage (synced via iCloud)
 - **youtube-transcript-api** for YouTube transcript extraction
 - **yt-dlp** for video metadata + YouTube search (Spotify converter)
 - **Spotify oEmbed API** for podcast episode metadata (no auth needed)
+- **Claude CLI** (`claude --model sonnet`) for classification and ideation prompts
 - **Claude Code** for interactive ideation (4-skill pipeline), caption generation, and Content Agent skills
-- **Claude Code Skills** — content-idea-generator, viral-hook-creator, creative-director, de-ai-ify, ca-brief, ca-classify, ca-ideate, ca-research, ca-captions, ca-sparring
 
 ---
 
@@ -315,9 +391,10 @@ content-pipeline-bot/
 
 | Version | Date | Changes |
 |---------|------|---------|
-| 2.0.0 | 2026-03-29 | Content Agent upgrade: classifier engine (engines/classifier.py), auto-classification in orchestrator, 7 /ca-* skills (ca-help, ca-brief, ca-classify, ca-ideate, ca-research, ca-captions, ca-sparring), knowledge files system (Obsidian vault + local fallback), classify_prompt.md. New `classified` status in Links Queue. |
-| 1.3.0 | 2026-03-18 | 4-skill ideation pipeline replaces single-shot prompt: content-idea-generator (quick mode, 5 ideas) → viral-hook-creator (5 hooks per idea) → creative-director (score, rank, kill weak ideas) → de-ai-ify (clean up language). New Notion fields: Score, Top Pick, Filming Setup (multi-select), Filming Priority. Hook 1-5 replace single Suggested Hook. Morning Menu view now sorted by score with filming columns. Creator context file for positioning/ICP. Legacy mode available via --legacy flag. |
-| 1.2.0 | 2026-03-18 | "Generate Ideas" status workflow: ideation.py now only processes links you've tagged `generate_ideas` in Notion (not all transcribed). New triage statuses: `learning`, `inspiration`, `postponed`, `other` for non-content links. Original Caption now included in ideation prompt for better context. Original URL field added to Content Ideas DB. 5 Content Ideas views: Morning Menu, Filming Today, Ready to Post, Posted, Archive. Python 3.9 compatibility fix. |
-| 1.1.0 | 2026-03-18 | TikToks/Reels no longer pushed to Notion on save (avoids duplicates — Notion rows created via TokScript CSV only). YouTube extractor now captures video descriptions into Original Caption field. TokScript parser has retry logic for Notion API timeouts. Cleaned up 41 duplicate shortened TikTok URLs. |
-| 1.0.0 | 2026-03-18 | Phase 1 MVP complete: Telegram bot with Notion sync, YouTube extractor, TokScript parser, Spotify converter, ideation engine, caption generator, orchestrator. 6 filtered views on Links Queue. /note syncs to Notion. Original Caption field for full captions/descriptions. |
-| 0.1.0 | 2026-03-09 | Original video-pipeline bot: Telegram link collector with text file storage |
+| 2.1.0 | 2026-03-31 | Classifier v2: 4 new knowledge tag types (ai_knowledge, business_knowledge, knowledge_nugget, news), non-exclusive tagging with per-file framing, Obsidian #tags on every entry, heading-based deduplication, news date stamps. 9 Obsidian knowledge files. Notion Content Tags updated. 27 tests. |
+| 2.0.0 | 2026-03-29 | Content Agent upgrade: classifier engine, auto-classification in orchestrator, 7 /ca-* skills, knowledge files system (Obsidian vault + local fallback), classify_prompt.md. React + FastAPI dashboard with FilterBar, IdeaCard, IdeaDetail. `run.sh` for single-command startup. |
+| 1.3.0 | 2026-03-18 | 4-skill ideation pipeline: content-idea-generator → viral-hook-creator → creative-director → de-ai-ify. Score, Top Pick, Filming Setup, Filming Priority fields. Morning Menu view sorted by score. |
+| 1.2.0 | 2026-03-18 | "Generate Ideas" status workflow. Triage statuses: learning, inspiration, postponed, other. Original Caption in ideation. 5 Content Ideas views. |
+| 1.1.0 | 2026-03-18 | TikToks/Reels no longer pushed to Notion on save. YouTube descriptions captured. TokScript retry logic. Duplicate URL cleanup. |
+| 1.0.0 | 2026-03-18 | Phase 1 MVP: Telegram bot, Notion sync, YouTube extractor, TokScript parser, Spotify converter, ideation engine, caption generator, orchestrator. |
+| 0.1.0 | 2026-03-09 | Original video-pipeline bot: Telegram link collector with text file storage. |

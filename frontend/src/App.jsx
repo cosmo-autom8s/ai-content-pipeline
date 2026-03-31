@@ -7,11 +7,8 @@ import IdeaDetail from './components/IdeaDetail'
 
 const CardGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: ${({ theme }) => theme.spacing.lg};
-  @media (max-width: 1200px) {
-    grid-template-columns: repeat(2, 1fr);
-  }
 `
 
 const spin = keyframes`

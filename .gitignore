@@ -15,3 +15,10 @@ frontend/dist/
 # IDE
 .idea/
 .vscode/
+
+# Local data
+.claude/
+links/
+logs/
+csv_inbox/*.csv
+csv_inbox/processed/

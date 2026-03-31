@@ -11,6 +11,8 @@ const Card = styled.div`
   display: flex;
   flex-direction: column;
   gap: ${({ theme }) => theme.spacing.sm};
+  min-width: 0;
+  overflow: hidden;
 
   &:hover {
     background: ${({ theme }) => theme.colors.surfaceHover};
@@ -27,7 +29,7 @@ const TopRow = styled.div`
 `
 
 const Score = styled.span`
-  font-size: ${({ theme }) => theme.fontSize.score};
+  font-size: ${({ theme }) => theme.fontSize.xl};
   font-weight: 800;
   font-family: ${({ theme }) => theme.fonts.mono};
   line-height: 1;
@@ -58,14 +60,15 @@ const Name = styled.h3`
   font-size: ${({ theme }) => theme.fontSize.md};
   font-weight: 600;
   color: ${({ theme }) => theme.colors.text};
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.4;
 `
 
 const Label = styled.span`
   font-size: ${({ theme }) => theme.fontSize.xs};
   color: ${({ theme }) => theme.colors.textMuted};
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 `
 
 const Pill = styled.span`
@@ -147,7 +150,7 @@ function IdeaCard({ idea, onClick }) {
 
       <Name title={idea.name}>{idea.name}</Name>
 
-      {idea.main_topic && <Label>{idea.main_topic}</Label>}
+      {idea.description && <Label>{idea.description}</Label>}
 
       <MetaRow>
         {idea.format && (

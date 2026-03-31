@@ -108,10 +108,10 @@ const HeaderLeft = styled.div`
 
 const IdeaName = styled.h2`
   margin: 0;
-  font-size: ${({ theme }) => theme.fontSize.xl};
+  font-size: ${({ theme }) => theme.fontSize.lg};
   font-weight: 700;
   color: ${({ theme }) => theme.colors.text};
-  line-height: 1.2;
+  line-height: 1.3;
 `
 
 const BadgeRow = styled.div`
@@ -122,7 +122,7 @@ const BadgeRow = styled.div`
 `
 
 const BigScore = styled.span`
-  font-size: ${({ theme }) => theme.fontSize.score};
+  font-size: ${({ theme }) => theme.fontSize.md};
   font-weight: 800;
   font-family: ${({ theme }) => theme.fonts.mono};
   line-height: 1;
