@@ -178,22 +178,93 @@ def format_obsidian_entry(tag_type: str, data) -> str:
         parts.append(f"**Source URL:** {data['source_url']}")
         return "\n".join(parts)
 
+    if tag_type == "ai_knowledge":
+        tags_line = _render_obsidian_tags(data)
+        takeaways = data.get("key_takeaways", [])
+        parts = [
+            f"## {data['title']}\n",
+            f"{data['knowledge']}\n",
+        ]
+        if takeaways:
+            parts.append("**Key takeaways:**")
+            for t in takeaways:
+                parts.append(f"- {t}")
+            parts.append("")
+        if tags_line:
+            parts.append(f"{tags_line}\n")
+        parts.append(f"**Source:** {data['source_author']}")
+        parts.append(f"**Source URL:** {data['source_url']}")
+        return "\n".join(parts)
+
+    if tag_type == "business_knowledge":
+        tags_line = _render_obsidian_tags(data)
+        parts = [
+            f"## {data['title']}\n",
+            f"{data['insight']}\n",
+            f"**How to apply:** {data['how_to_apply']}\n",
+        ]
+        if tags_line:
+            parts.append(f"{tags_line}\n")
+        parts.append(f"**Source:** {data['source_author']}")
+        parts.append(f"**Source URL:** {data['source_url']}")
+        return "\n".join(parts)
+
+    if tag_type == "knowledge_nugget":
+        tags_line = _render_obsidian_tags(data)
+        parts = [
+            f"## {data['title']}\n",
+            f"{data['knowledge']}\n",
+            f"**Why it matters:** {data['why_it_matters']}\n",
+        ]
+        if tags_line:
+            parts.append(f"{tags_line}\n")
+        parts.append(f"**Source:** {data['source_author']}")
+        parts.append(f"**Source URL:** {data['source_url']}")
+        return "\n".join(parts)
+
+    if tag_type == "news":
+        tags_line = _render_obsidian_tags(data)
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        parts = [
+            f"## {data['headline']}\n",
+            f"*{date_str}*\n",
+            f"{data['summary']}\n",
+            f"**Why it matters:** {data['why_it_matters']}\n",
+        ]
+        if tags_line:
+            parts.append(f"{tags_line}\n")
+        parts.append(f"**Source:** {data['source_author']}")
+        parts.append(f"**Source URL:** {data['source_url']}")
+        return "\n".join(parts)
+
     raise ValueError(f"Unknown tag_type: {tag_type!r}")
 
 
 def append_to_knowledge_file(file_path: Path, entry: str) -> bool:
-    """Append entry to a knowledge file, deduplicating by Source URL.
+    """Append entry to a knowledge file, deduplicating by Source URL and heading.
 
-    Returns False if the Source URL already exists in the file.
+    Returns False if:
+    - The Source URL already exists in the file, OR
+    - A markdown heading (## Title) from the entry already exists in the file.
     Inserts a --- separator when the file does not already end with one.
     """
+    existing = file_path.read_text() if file_path.exists() else ""
+
+    # Deduplicate by Source URL
     url_match = re.search(r'\*\*Source URL:\*\*\s*(.+)', entry)
-    if url_match and file_path.exists():
+    if url_match and existing:
         source_url = url_match.group(1).strip()
-        existing = file_path.read_text()
         if source_url in existing:
             return False
-    existing = file_path.read_text() if file_path.exists() else ""
+
+    # Deduplicate by heading (## Title or ### Title)
+    heading_match = re.match(r'^(#{2,3})\s+(.+)', entry)
+    if heading_match and existing:
+        heading_level = heading_match.group(1)
+        heading_text = heading_match.group(2).strip()
+        if re.search(rf'^{re.escape(heading_level)}\s+{re.escape(heading_text)}\s*$', existing, re.MULTILINE):
+            return False
+
     if existing.rstrip().endswith("---"):
         with open(file_path, "a", encoding="utf-8") as f:
             f.write(f"\n\n{entry}\n")
@@ -402,8 +473,11 @@ def classify_link(link, dry_run=False):
         "tool_discovery": "tool-library.md",
         "content_idea": "idea-backlog.md",
         "workflow": "workflows.md",
+        "ai_knowledge": "ai-knowledge.md",
+        "business_knowledge": "business-knowledge.md",
+        "knowledge_nugget": "knowledge-nuggets.md",
+        "news": "news.md",
     }
-    # news is not persisted. inspiration takeaway is in AI Summary only.
 
     # Map tag names to JSON keys in Claude's output
     tag_to_json_key = {
@@ -412,6 +486,10 @@ def classify_link(link, dry_run=False):
         "tool_discovery": "tool",
         "content_idea": "idea",
         "workflow": "workflow",
+        "ai_knowledge": "ai_knowledge",
+        "business_knowledge": "business_knowledge",
+        "knowledge_nugget": "knowledge_nugget",
+        "news": "news_item",
     }
 
     for tag in tags:

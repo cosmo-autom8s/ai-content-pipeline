@@ -245,3 +245,162 @@ def test_format_without_obsidian_tags_still_works():
     result = format_obsidian_entry("content_lesson", data)
     assert "**Tags:**" not in result
     assert "## Old Lesson" in result
+
+
+# ---------------------------------------------------------------------------
+# New knowledge tag types
+# ---------------------------------------------------------------------------
+
+def test_format_ai_knowledge_entry():
+    data = {
+        "title": "How Claude Skills Work",
+        "knowledge": "Claude skills are markdown files with YAML frontmatter stored in ~/.claude/skills/.",
+        "key_takeaways": ["Skills auto-load by context", "YAML frontmatter defines name and description"],
+        "obsidian_tags": ["Claude", "Claude-Code", "skills"],
+        "source_author": "rpn",
+        "source_url": "https://example.com/skills",
+    }
+    result = format_obsidian_entry("ai_knowledge", data)
+    assert "## How Claude Skills Work" in result
+    assert "Claude skills are markdown files" in result
+    assert "**Key takeaways:**" in result
+    assert "Skills auto-load by context" in result
+    assert "**Tags:** #Claude #Claude-Code #skills" in result
+    assert "**Source:** rpn" in result
+    assert "**Source URL:**" in result
+
+
+def test_format_business_knowledge_entry():
+    data = {
+        "title": "The Sales Funnel as a Trust Gradient",
+        "insight": "Each stage of the funnel earns a higher level of trust.",
+        "how_to_apply": "Start with a low-friction first sale, then expand.",
+        "obsidian_tags": ["sales", "funnels", "customer-journey"],
+        "source_author": "gs2ai",
+        "source_url": "https://example.com/funnels",
+    }
+    result = format_obsidian_entry("business_knowledge", data)
+    assert "## The Sales Funnel as a Trust Gradient" in result
+    assert "Each stage of the funnel" in result
+    assert "**How to apply:**" in result
+    assert "**Tags:** #sales #funnels #customer-journey" in result
+    assert "**Source:** gs2ai" in result
+
+
+def test_format_knowledge_nugget_entry():
+    data = {
+        "title": "Loss Aversion in Decision-Making",
+        "knowledge": "People feel losses roughly twice as strongly as equivalent gains.",
+        "why_it_matters": "Explains why businesses resist change even when the upside is clear.",
+        "obsidian_tags": ["psychology", "decision-making", "behavioral-economics"],
+        "source_author": "frankniu",
+        "source_url": "https://example.com/loss-aversion",
+    }
+    result = format_obsidian_entry("knowledge_nugget", data)
+    assert "## Loss Aversion in Decision-Making" in result
+    assert "People feel losses roughly" in result
+    assert "**Why it matters:**" in result
+    assert "**Tags:** #psychology #decision-making #behavioral-economics" in result
+    assert "**Source:** frankniu" in result
+
+
+def test_format_news_entry():
+    data = {
+        "headline": "Anthropic releases Claude 4.5 with native tool use",
+        "summary": "New Claude model supports direct tool execution without wrapper frameworks.",
+        "why_it_matters": "Simplifies agent architectures for SMB automation use cases.",
+        "obsidian_tags": ["Anthropic", "Claude", "agents"],
+        "source_author": "ava.on.ai",
+        "source_url": "https://example.com/news",
+    }
+    result = format_obsidian_entry("news", data)
+    assert "## Anthropic releases Claude 4.5" in result
+    assert "**Why it matters:**" in result
+    assert "**Tags:** #Anthropic #Claude #agents" in result
+    assert "**Source:** ava.on.ai" in result
+
+
+# ---------------------------------------------------------------------------
+# Heading-based deduplication
+# ---------------------------------------------------------------------------
+
+def test_append_deduplicates_tool_by_name(tmp_path):
+    """When a tool entry with the same ## heading exists, skip it."""
+    knowledge_file = tmp_path / "tool-library.md"
+    entry1 = (
+        "## Claude Code\n\nFirst description.\n\n"
+        "**Source:** @first\n**Source URL:** https://example.com/first"
+    )
+    entry2 = (
+        "## Claude Code\n\nSecond description from different source.\n\n"
+        "**Source:** @second\n**Source URL:** https://example.com/second"
+    )
+    first = append_to_knowledge_file(knowledge_file, entry1)
+    assert first is True
+    second = append_to_knowledge_file(knowledge_file, entry2)
+    assert second is False
+    content = knowledge_file.read_text()
+    assert content.count("## Claude Code") == 1
+
+
+def test_append_allows_different_tool_names(tmp_path):
+    """Different tool names should both be appended."""
+    knowledge_file = tmp_path / "tool-library.md"
+    entry1 = (
+        "## Claude Code\n\nFirst tool.\n\n"
+        "**Source:** @a\n**Source URL:** https://example.com/a"
+    )
+    entry2 = (
+        "## Descript\n\nSecond tool.\n\n"
+        "**Source:** @b\n**Source URL:** https://example.com/b"
+    )
+    append_to_knowledge_file(knowledge_file, entry1)
+    result = append_to_knowledge_file(knowledge_file, entry2)
+    assert result is True
+    content = knowledge_file.read_text()
+    assert "## Claude Code" in content
+    assert "## Descript" in content
+
+
+# ---------------------------------------------------------------------------
+# Integration: parse + new tag types
+# ---------------------------------------------------------------------------
+
+def test_parse_output_with_new_knowledge_tags():
+    """Full classifier output with new tag types parses correctly."""
+    import json
+    raw = json.dumps({
+        "tags": ["ai_knowledge", "business_knowledge", "content_lesson"],
+        "summary": "A video about AI funnels with both technical and business insights.",
+        "ai_knowledge": {
+            "title": "How to Build an AI Sales Funnel",
+            "knowledge": "Chain Claude calls to qualify leads automatically.",
+            "key_takeaways": ["Use structured output for lead scoring"],
+            "obsidian_tags": ["Claude", "lead-gen", "funnels"],
+            "source_author": "testauthor",
+            "source_url": "https://example.com/test"
+        },
+        "business_knowledge": {
+            "title": "The AI Sales Funnel as Revenue Engine",
+            "insight": "AI funnels reduce cost-per-lead by automating qualification.",
+            "how_to_apply": "Start with the highest-volume intake channel.",
+            "obsidian_tags": ["sales", "funnels", "revenue"],
+            "source_author": "testauthor",
+            "source_url": "https://example.com/test"
+        },
+        "lesson": {
+            "title": "Funnel Stages Map to Content Types",
+            "principle": "Each funnel stage has a content type that moves people through it.",
+            "how_to_apply": "Match your content to where your audience is in the journey.",
+            "obsidian_tags": ["content-strategy", "funnels"],
+            "source_author": "testauthor",
+            "source_url": "https://example.com/test"
+        }
+    })
+    result = parse_classifier_output(raw)
+    assert result is not None
+    assert "ai_knowledge" in result["tags"]
+    assert "business_knowledge" in result["tags"]
+    assert result["ai_knowledge"]["title"] == "How to Build an AI Sales Funnel"
+    assert result["business_knowledge"]["insight"].startswith("AI funnels")
+    assert result["lesson"]["obsidian_tags"] == ["content-strategy", "funnels"]
