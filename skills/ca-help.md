@@ -34,3 +34,7 @@ Your knowledge files live in `$OBSIDIAN_VAULT_PATH/content/` (or locally in `kno
 | `tool-library.md` | Tools, frameworks, and systems you reference in your content |
 | `idea-backlog.md` | Raw ideas, half-formed thoughts, and topics you want to explore |
 | `workflows.md` | Your content production process — from idea to published |
+| `ai-knowledge.md` | Technical AI knowledge — tools, architectures, prompt techniques, model capabilities |
+| `business-knowledge.md` | Business strategy, sales, operations, and market insights |
+| `knowledge-nuggets.md` | General knowledge — psychology, economics, history, mental models |
+| `news.md` | Time-sensitive industry news and trends with concrete implications |

@@ -33,6 +33,10 @@ Fallback location: `knowledge/` (local dir)
 | `tool-library.md` | AI and ops tools discovered, categorized, with notes |
 | `idea-backlog.md` | Content ideas extracted from saved videos |
 | `workflows.md` | Business processes worth studying or referencing |
+| `ai-knowledge.md` | Technical AI knowledge — tools, architectures, prompt techniques |
+| `business-knowledge.md` | Business strategy, sales, ops, and market insights |
+| `knowledge-nuggets.md` | General knowledge — psychology, economics, mental models |
+| `news.md` | Time-sensitive industry news with implications |
 
 If a knowledge file doesn't exist yet, note it's empty — don't pretend it has content.
 
