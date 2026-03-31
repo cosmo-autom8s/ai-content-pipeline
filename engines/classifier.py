@@ -89,63 +89,94 @@ def truncate_transcript(text: str, max_words: int = 6000) -> str:
     return " ".join(words[:max_words]) + f"\n\n[truncated — original was {len(words)} words]"
 
 
+def _render_obsidian_tags(data) -> str:
+    """Render obsidian_tags list as a Tags line. Returns empty string if no tags."""
+    if isinstance(data, list):
+        # hook_pattern passes a list of dicts — collect tags from all hooks
+        all_tags = []
+        for item in data:
+            all_tags.extend(item.get("obsidian_tags", []))
+        tags = list(dict.fromkeys(all_tags))  # dedupe preserving order
+    else:
+        tags = data.get("obsidian_tags", [])
+    if not tags:
+        return ""
+    return "**Tags:** " + " ".join(f"#{t}" for t in tags)
+
+
 def format_obsidian_entry(tag_type: str, data) -> str:
     """Format extracted data as markdown for an Obsidian knowledge file.
 
-    Each tag_type produces a distinct markdown block:
-      - content_lesson
-      - hook_pattern  (data is a list of hook dicts)
-      - tool_discovery
-      - content_idea
-      - workflow
+    Each tag_type produces a distinct markdown block. All blocks support
+    an optional obsidian_tags array rendered as #tag format.
     """
     if tag_type == "content_lesson":
-        return (
-            f"## {data['title']}\n\n"
-            f"{data['principle']}\n\n"
-            f"**How to apply:** {data['how_to_apply']}\n\n"
-            f"**Source:** {data['source_author']}\n"
-            f"**Source URL:** {data['source_url']}"
-        )
+        tags_line = _render_obsidian_tags(data)
+        parts = [
+            f"## {data['title']}\n",
+            f"{data['principle']}\n",
+            f"**How to apply:** {data['how_to_apply']}\n",
+        ]
+        if tags_line:
+            parts.append(f"{tags_line}\n")
+        parts.append(f"**Source:** {data['source_author']}")
+        parts.append(f"**Source URL:** {data['source_url']}")
+        return "\n".join(parts)
 
     if tag_type == "hook_pattern":
-        parts = []
+        result_parts = []
+        tags_line = _render_obsidian_tags(data)
         for hook in data:
-            parts.append(
-                f"### {hook['pattern'].title()}\n\n"
-                f"> {hook['text']}\n\n"
-                f"**Source:** {hook['source_author']}\n"
-                f"**Source URL:** {hook['source_url']}"
-            )
-        return "\n\n".join(parts)
+            hook_parts = [
+                f"### {hook['pattern'].title()}\n",
+                f"> {hook['text']}\n",
+            ]
+            if tags_line:
+                hook_parts.append(f"{tags_line}\n")
+            hook_parts.append(f"**Source:** {hook['source_author']}")
+            hook_parts.append(f"**Source URL:** {hook['source_url']}")
+            result_parts.append("\n".join(hook_parts))
+        return "\n\n".join(result_parts)
 
     if tag_type == "tool_discovery":
-        return (
-            f"## {data['name']}\n\n"
-            f"{data['description']}\n\n"
-            f"**Use case:** {data['use_case']}\n"
-            f"**Link:** {data['link']}\n"
-            f"**Source:** {data['source_author']}\n"
-            f"**Source URL:** {data['source_url']}"
-        )
+        tags_line = _render_obsidian_tags(data)
+        parts = [
+            f"## {data['name']}\n",
+            f"{data['description']}\n",
+            f"**Use case:** {data['use_case']}",
+            f"**Link:** {data['link']}",
+        ]
+        if tags_line:
+            parts.append(tags_line)
+        parts.append(f"**Source:** {data['source_author']}")
+        parts.append(f"**Source URL:** {data['source_url']}")
+        return "\n".join(parts)
 
     if tag_type == "content_idea":
-        return (
-            f"## {data['title']}\n\n"
-            f"**Angle:** {data['angle']}\n\n"
-            f"{data['description']}\n\n"
-            f"**Source:** {data['source_author']}\n"
-            f"**Source URL:** {data['source_url']}"
-        )
+        tags_line = _render_obsidian_tags(data)
+        parts = [
+            f"## {data['title']}\n",
+            f"**Angle:** {data['angle']}\n",
+            f"{data['description']}\n",
+        ]
+        if tags_line:
+            parts.append(f"{tags_line}\n")
+        parts.append(f"**Source:** {data['source_author']}")
+        parts.append(f"**Source URL:** {data['source_url']}")
+        return "\n".join(parts)
 
     if tag_type == "workflow":
-        return (
-            f"## {data['title']}\n\n"
-            f"**Steps:** {data['steps']}\n\n"
-            f"**Why it works:** {data['why_it_works']}\n\n"
-            f"**Source:** {data['source_author']}\n"
-            f"**Source URL:** {data['source_url']}"
-        )
+        tags_line = _render_obsidian_tags(data)
+        parts = [
+            f"## {data['title']}\n",
+            f"**Steps:** {data['steps']}\n",
+            f"**Why it works:** {data['why_it_works']}\n",
+        ]
+        if tags_line:
+            parts.append(f"{tags_line}\n")
+        parts.append(f"**Source:** {data['source_author']}")
+        parts.append(f"**Source URL:** {data['source_url']}")
+        return "\n".join(parts)
 
     raise ValueError(f"Unknown tag_type: {tag_type!r}")
 

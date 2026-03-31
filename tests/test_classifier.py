@@ -185,3 +185,63 @@ def test_append_deduplicates_by_url(tmp_path):
     # Second write with the same URL should return False
     second = append_to_knowledge_file(knowledge_file, entry)
     assert second is False
+
+
+# ---------------------------------------------------------------------------
+# Obsidian tag rendering
+# ---------------------------------------------------------------------------
+
+def test_format_lesson_with_obsidian_tags():
+    data = {
+        "title": "Hook-Payoff Gap",
+        "principle": "The gap between hook and payoff drives engagement.",
+        "how_to_apply": "Write the hook last.",
+        "source_author": "@creator",
+        "source_url": "https://example.com/video",
+        "obsidian_tags": ["content-strategy", "hooks", "short-form"],
+    }
+    result = format_obsidian_entry("content_lesson", data)
+    assert "**Tags:** #content-strategy #hooks #short-form" in result
+
+
+def test_format_tool_with_obsidian_tags():
+    data = {
+        "name": "Descript",
+        "description": "AI-powered video editor.",
+        "use_case": "Remove filler words automatically.",
+        "link": "https://descript.com",
+        "source_author": "@editor",
+        "source_url": "https://example.com/descript",
+        "obsidian_tags": ["Descript", "video-editing", "AI-tools"],
+    }
+    result = format_obsidian_entry("tool_discovery", data)
+    assert "**Tags:** #Descript #video-editing #AI-tools" in result
+
+
+def test_format_hook_with_obsidian_tags():
+    data = [
+        {
+            "pattern": "contrarian",
+            "text": "Stop posting every day.",
+            "source_author": "@guru",
+            "source_url": "https://example.com/hook",
+            "obsidian_tags": ["content-strategy", "posting-frequency"],
+        }
+    ]
+    result = format_obsidian_entry("hook_pattern", data)
+    assert "#content-strategy" in result
+    assert "#posting-frequency" in result
+
+
+def test_format_without_obsidian_tags_still_works():
+    """Backward compat — no obsidian_tags key means no Tags line."""
+    data = {
+        "title": "Old Lesson",
+        "principle": "Some principle.",
+        "how_to_apply": "Apply it.",
+        "source_author": "@old",
+        "source_url": "https://example.com/old",
+    }
+    result = format_obsidian_entry("content_lesson", data)
+    assert "**Tags:**" not in result
+    assert "## Old Lesson" in result
