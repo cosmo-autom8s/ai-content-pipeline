@@ -17,12 +17,15 @@ from dotenv import load_dotenv
 
 # Load .env from project root
 env_path = Path(__file__).parent.parent / ".env"
-load_dotenv(env_path)
+load_dotenv(env_path, override=True)
 
 NOTION_API_KEY = os.getenv("NOTION_API_KEY")
 NOTION_LINKS_DB_ID = os.getenv("NOTION_LINKS_DB_ID")
 OBSIDIAN_VAULT_PATH = os.getenv("OBSIDIAN_VAULT_PATH", "")
 LOCAL_KNOWLEDGE_DIR = Path(__file__).parent.parent / "knowledge"
+
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+CLASSIFIER_MODEL = os.getenv("CLASSIFIER_MODEL", "qwen/qwen3.6-plus:free")
 
 NOTION_HEADERS = {
     "Authorization": f"Bearer {NOTION_API_KEY}",
@@ -37,6 +40,38 @@ PROMPT_TEMPLATE_PATH = Path(__file__).parent.parent / "prompts" / "classify_prom
 CREATOR_CONTEXT_PATH = Path(__file__).parent.parent / "prompts" / "creator_context.md"
 
 LOG_DIR = Path(__file__).parent.parent / "logs"
+
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+
+def _call_llm(prompt: str) -> Optional[str]:
+    """Call OpenRouter API for classification. Retries on 429 with 30s backoff."""
+    if not OPENROUTER_API_KEY:
+        raise RuntimeError("OPENROUTER_API_KEY not set in .env")
+    for attempt in range(3):
+        resp = requests.post(
+            url=OPENROUTER_URL,
+            headers={
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            data=json.dumps({
+                "model": CLASSIFIER_MODEL,
+                "messages": [{"role": "user", "content": prompt}],
+            }),
+            timeout=120,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            choices = data.get("choices", [])
+            if not choices:
+                return None
+            return choices[0].get("message", {}).get("content")
+        if resp.status_code == 429 and attempt < 2:
+            print(f"    ⏳ Rate limited, retrying in 30s (attempt {attempt + 1}/3)...")
+            time.sleep(30)
+            continue
+        return None
 
 
 def _load_prompt_template() -> str:
@@ -422,38 +457,32 @@ def classify_link(link, dry_run=False):
     print(f"  Classifying: {link['name'][:60]}")
 
     try:
-        # Pipe prompt via stdin to avoid ARG_MAX
-        result = subprocess.run(
-            ["claude", "--model", "sonnet", "-p", "-"],
-            input=prompt, capture_output=True, text=True, timeout=120
-        )
-    except subprocess.TimeoutExpired:
-        print(f"    ⏳ Timeout after 120s")
-        log_classification_error(link["page_id"], "timeout")
+        output = _call_llm(prompt)
+    except Exception as e:
+        print(f"    ⏳ Error: {e}")
+        log_classification_error(link["page_id"], str(e))
         mark_classification_error(link["page_id"])
         return False
 
-    if result.returncode != 0:
-        print(f"    ❌ Claude CLI error: {result.stderr[:200]}")
-        log_classification_error(link["page_id"], result.stderr)
+    if output is None:
+        print(f"    ❌ No response from OpenRouter")
+        log_classification_error(link["page_id"], "empty response")
         mark_classification_error(link["page_id"])
         return False
 
-    parsed = parse_classifier_output(result.stdout)
+    parsed = parse_classifier_output(output)
     if parsed is None:
         # Retry once
         try:
-            result = subprocess.run(
-                ["claude", "--model", "sonnet", "-p", "-"],
-                input=prompt, capture_output=True, text=True, timeout=120
-            )
-            parsed = parse_classifier_output(result.stdout)
-        except subprocess.TimeoutExpired:
+            output = _call_llm(prompt)
+            if output:
+                parsed = parse_classifier_output(output)
+        except Exception:
             pass
 
     if parsed is None:
         print(f"    ❌ Could not parse output")
-        log_classification_error(link["page_id"], result.stdout if result else "no output")
+        log_classification_error(link["page_id"], output or "no output")
         mark_classification_error(link["page_id"])
         return False
 
@@ -509,7 +538,7 @@ def classify_link(link, dry_run=False):
 # Batch runner and CLI
 # ---------------------------------------------------------------------------
 
-def classify_all_transcribed(dry_run=False, retry_errors=False):
+def classify_all_transcribed(dry_run=False, retry_errors=False, limit=None):
     if retry_errors:
         links = query_error_links()
         print(f"Found {len(links)} links with classification_error")
@@ -518,11 +547,17 @@ def classify_all_transcribed(dry_run=False, retry_errors=False):
         print(f"Found {len(links)} transcribed links to classify")
     if not links:
         return 0
+    if limit:
+        links = links[:limit]
+        print(f"Limiting to first {limit} links")
     classified = 0
+    api_delay = int(os.getenv("CLASSIFIER_DELAY", "5"))
     for i, link in enumerate(links, 1):
         print(f"\n[{i}/{len(links)}] {link['name'][:60]}")
         if classify_link(link, dry_run):
             classified += 1
+        if not dry_run and i < len(links):
+            time.sleep(api_delay)
     return classified
 
 
@@ -530,7 +565,11 @@ def main():
     args = sys.argv[1:]
     dry_run = "--dry-run" in args
     retry_errors = "--retry-errors" in args
-    count = classify_all_transcribed(dry_run=dry_run, retry_errors=retry_errors)
+    limit = None
+    for arg in args:
+        if arg.startswith("--limit="):
+            limit = int(arg.split("=", 1)[1])
+    count = classify_all_transcribed(dry_run=dry_run, retry_errors=retry_errors, limit=limit)
     print(f"\n✅ Done: {count} classified")
 
 

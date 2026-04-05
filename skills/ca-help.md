@@ -11,6 +11,7 @@ I'm your Content Agent — a sparring partner for content creation that gets sma
 |---|---|---|
 | `/ca-help` | Show this help reference | `/ca-help` |
 | `/ca-brief` | Morning brief — pipeline status, top ideas, recent knowledge | `/ca-brief` |
+| `/ca-extract` | Extract transcripts from pending links via TokScript MCP | `/ca-extract` |
 | `/ca-classify` | Run the classifier on transcribed links — auto-tag and extract insights | `/ca-classify` |
 | `/ca-ideate` | Generate content ideas from queued links or a topic | `/ca-ideate` or `/ca-ideate AI automation for dentists` |
 | `/ca-research` | Research a topic, save findings to knowledge files | `/ca-research AI content agents` |

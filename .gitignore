@@ -22,3 +22,4 @@ links/
 logs/
 csv_inbox/*.csv
 csv_inbox/processed/
+csv_inbox/mcp_extracts/

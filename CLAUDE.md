@@ -48,6 +48,7 @@ If a knowledge file doesn't exist yet, note it's empty — don't pretend it has 
 |---------|-------------|
 | `/ca-help` | Show all commands and how to use them |
 | `/ca-brief` | Morning brief — pipeline status, top ideas, recent knowledge additions |
+| `/ca-extract` | Extract transcripts from pending links via TokScript MCP |
 | `/ca-classify` | Run classifier on transcribed links in the queue |
 | `/ca-ideate` | Generate content ideas from queued links or a given topic |
 | `/ca-research` | Research a topic and save findings to the relevant knowledge file |

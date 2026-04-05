@@ -3,10 +3,11 @@
 Evening Orchestrator — Step 7 of Content Engine
 
 Runs the full evening pipeline:
-1. Query Links Queue for status=pending
-2. Process YouTube links through transcript extractor
-3. Print summary of what was processed and what needs manual attention
-4. Optionally trigger ideation listing
+1. Process any CSV exports in csv_inbox/
+2. Query Links Queue for status=pending
+3. Process YouTube links through transcript extractor
+4. Extract short-form links (TikTok/Instagram/YT Shorts) via Claude CLI + TokScript MCP
+5. Classify all newly transcribed links
 
 Usage:
     python orchestrator.py              # Run full pipeline
@@ -16,8 +17,12 @@ Usage:
 
 from __future__ import annotations
 
+import json
 import os
+import shutil
+import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import requests
@@ -28,7 +33,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from extractors.youtube import (
     extract_video_id,
-    process_link,
+    process_links_via_mcp,
     query_pending_youtube_links,
 )
 from extractors.tokscript_parser import CSV_INBOX
@@ -50,7 +55,7 @@ NOTION_HEADERS = {
 
 # Categories that can be auto-transcribed vs need manual work
 AUTO_CATEGORIES = {"podcast", "long_form"}
-MANUAL_CATEGORIES = {"short_form"}  # needs TokScript
+MANUAL_CATEGORIES = {"short_form"}  # extracted via Claude CLI + TokScript MCP
 SKIP_CATEGORIES = {"carousel", "x_post", "linkedin", "reddit"}
 
 
@@ -174,6 +179,144 @@ def show_status():
     print()
 
 
+MCP_EXTRACT_BUDGET = 0.50  # safety cap per orchestrator run
+MCP_BACKUP_DIR = Path(__file__).parent / "csv_inbox" / "mcp_extracts"
+
+# Claude CLI path — resolve once at import time
+CLAUDE_CLI = shutil.which("claude")
+
+
+def build_mcp_prompt(links: list[dict]) -> str:
+    """Build the prompt sent to claude CLI for MCP transcript extraction."""
+    urls_block = "\n".join(
+        f"- page_id: {l['page_id']} | url: {l['url']} | name: {l['name'][:60]}"
+        for l in links
+    )
+    return f"""You are a transcript extraction worker. Extract transcripts for the following links using TokScript MCP tools, then update each Notion page.
+
+## Links to process
+{urls_block}
+
+## Instructions
+For each link:
+1. Detect platform from the URL (instagram, tiktok, or youtube).
+2. Call the matching MCP tool to get the transcript:
+   - Instagram: mcp__claude_ai_Tokscript__get_instagram_transcript (video_url, format: "json")
+   - TikTok: mcp__claude_ai_Tokscript__get_tiktok_transcript (video_url, format: "json")
+   - YouTube: mcp__claude_ai_Tokscript__get_youtube_transcript (video_url, format: "json")
+3. Update the Notion page (use the page_id) via mcp__claude_ai_Notion__notion-update-page:
+   - Set Status to "transcribed"
+   - Set Transcript to all transcript segment texts joined with spaces (send the FULL transcript, do NOT truncate)
+   - Set Name to first 60 chars of the title (break at word boundary)
+   - Set "Original Caption" to the full title (send full text, do NOT truncate)
+   - Set "Source Views" to the view count as a string
+   - Set Duration to the duration as a string like "64.9s"
+   - Set Author to the author username
+
+Process all links. Call multiple MCP tools in parallel where possible.
+
+After processing all links, output a JSON summary as the LAST line of your response, in this exact format:
+EXTRACT_RESULT::{{"extracted": N, "failed": N, "details": [{{"url": "...", "status": "ok"|"error", "title": "...", "error": "..."}}]}}
+"""
+
+
+def extract_shortform_via_mcp(links: list[dict], dry_run: bool = False) -> int:
+    """Extract transcripts for short-form links by shelling out to claude CLI with MCP tools.
+
+    Returns the number of successfully extracted links.
+    """
+    if not links:
+        return 0
+
+    if not CLAUDE_CLI:
+        print("  claude CLI not found in PATH — skipping MCP extraction")
+        print("  Fallback: Export CSV from TokScript web → csv_inbox/")
+        return 0
+
+    if dry_run:
+        print(f"  (dry run — would extract {len(links)} link(s) via MCP)")
+        return 0
+
+    print(f"  Extracting {len(links)} link(s) via Claude CLI + TokScript MCP...")
+
+    prompt = build_mcp_prompt(links)
+
+    cmd = [
+        CLAUDE_CLI,
+        "-p", prompt,
+        "--model", "sonnet",
+        "--output-format", "text",
+        "--max-budget-usd", str(MCP_EXTRACT_BUDGET),
+        "--permission-mode", "bypassPermissions",
+        "--allowedTools",
+        "mcp__claude_ai_Tokscript__get_instagram_transcript",
+        "mcp__claude_ai_Tokscript__get_tiktok_transcript",
+        "mcp__claude_ai_Tokscript__get_youtube_transcript",
+        "mcp__claude_ai_Tokscript__get_bulk_transcripts",
+        "mcp__claude_ai_Notion__notion-update-page",
+    ]
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=300,  # 5 minute timeout
+            cwd=str(Path(__file__).parent),
+        )
+    except subprocess.TimeoutExpired:
+        print("  MCP extraction timed out after 5 minutes")
+        return 0
+
+    if result.returncode != 0:
+        print(f"  Claude CLI exited with code {result.returncode}")
+        if result.stderr:
+            print(f"  stderr: {result.stderr[:300]}")
+        return 0
+
+    output = result.stdout
+
+    # Save full output as backup
+    MCP_BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    backup_path = MCP_BACKUP_DIR / f"mcp_extract_{timestamp}.txt"
+    backup_path.write_text(output, encoding="utf-8")
+
+    # Parse the result summary from the last line
+    extracted = 0
+    for line in reversed(output.splitlines()):
+        if line.startswith("EXTRACT_RESULT::"):
+            try:
+                summary = json.loads(line.removeprefix("EXTRACT_RESULT::"))
+                extracted = summary.get("extracted", 0)
+                failed = summary.get("failed", 0)
+                details = summary.get("details", [])
+
+                for d in details:
+                    status_icon = "ok" if d["status"] == "ok" else "FAIL"
+                    title = d.get("title", d.get("url", ""))[:50]
+                    msg = f"    [{status_icon}] {title}"
+                    if d.get("error"):
+                        msg += f" — {d['error']}"
+                    print(msg)
+
+                if failed:
+                    print(f"\n  {failed} link(s) failed — check backup: {backup_path}")
+            except json.JSONDecodeError:
+                print("  Could not parse extraction result summary")
+            break
+    else:
+        # No EXTRACT_RESULT line found — count Notion updates from output
+        extracted = output.count("transcribed")
+        if extracted:
+            print(f"  Extraction completed (estimated {extracted} updates)")
+        else:
+            print("  Extraction completed but could not verify results")
+
+    print(f"  Backup saved: {backup_path}")
+    return extracted
+
+
 def main():
     args = sys.argv[1:]
     dry_run = "--dry-run" in args
@@ -232,34 +375,24 @@ def main():
 
         print(f"\nFound {len(pending)} pending links:")
         print(f"  YouTube (auto-extract): {len(youtube_links)}")
-        print(f"  Short-form (needs TokScript): {len(manual_links)}")
+        print(f"  Short-form (MCP extract): {len(manual_links)}")
         print(f"  Skipped (no extractor): {len(skipped_links)}")
         print()
 
-        # Step 3: Process YouTube links
+        # Step 3: Process YouTube links via TokScript MCP
         if youtube_links:
-            print(f"Processing {len(youtube_links)} YouTube link(s)...")
-            print()
-            success = 0
-            for i, link in enumerate(youtube_links, 1):
-                print(f"[{i}/{len(youtube_links)}] {link['name'][:50]} — {link['url'][:60]}")
-                if dry_run:
-                    print("  (dry run — would extract transcript)")
-                else:
-                    if process_link(link["page_id"], link["url"], link["name"]):
-                        success += 1
-                print()
+            print(f"Processing {len(youtube_links)} YouTube link(s) via MCP...")
+            yt_success = process_links_via_mcp(youtube_links, dry_run)
             if not dry_run:
-                print(f"YouTube extraction: {success}/{len(youtube_links)} successful")
+                print(f"YouTube extraction: {yt_success}/{len(youtube_links)} successful")
             print()
 
-        # Step 4: Report manual work needed
+        # Step 4: Extract short-form links via Claude CLI + TokScript MCP
         if manual_links:
-            print("Manual attention needed (TokScript):")
-            for link in manual_links:
-                print(f"  {link['name'][:60]} — {link['url'][:60]}")
-            print(f"\n  Export transcripts via TokScript, drop CSV in csv_inbox/")
-            print(f"  Then run: python extractors/tokscript_parser.py")
+            print(f"Processing {len(manual_links)} short-form link(s) via MCP...")
+            mcp_success = extract_shortform_via_mcp(manual_links, dry_run)
+            if not dry_run:
+                print(f"MCP extraction: {mcp_success}/{len(manual_links)} successful")
             print()
 
         if skipped_links:

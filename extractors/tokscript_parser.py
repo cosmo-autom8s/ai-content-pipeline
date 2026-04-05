@@ -129,6 +129,14 @@ def make_short_name(title: str) -> str:
     return truncated + "..."
 
 
+def _rich_text_blocks(text: str) -> list[dict]:
+    """Split text into multiple rich_text blocks of up to 2000 chars each (Notion API limit per block)."""
+    blocks = []
+    for i in range(0, len(text), 2000):
+        blocks.append({"text": {"content": text[i:i + 2000]}})
+    return blocks
+
+
 def update_notion_page(page_id: str, row: dict) -> bool:
     """Update an existing Links Queue page with TokScript data."""
     properties = {
@@ -138,14 +146,14 @@ def update_notion_page(page_id: str, row: dict) -> bool:
     if row.get("Title"):
         # Full caption goes to "Original Caption", short version to "Name"
         properties["Original Caption"] = {
-            "rich_text": [{"text": {"content": row["Title"][:2000]}}]
+            "rich_text": _rich_text_blocks(row["Title"])
         }
         properties["Name"] = {
             "title": [{"text": {"content": make_short_name(row["Title"])}}]
         }
     if row.get("Transcript"):
         properties["Transcript"] = {
-            "rich_text": [{"text": {"content": row["Transcript"][:2000]}}]
+            "rich_text": _rich_text_blocks(row["Transcript"])
         }
     if row.get("Views"):
         properties["Source Views"] = {
@@ -185,7 +193,7 @@ def create_notion_page(row: dict) -> bool:
     full_title = row.get("Title", "Unknown")
     properties = {
         "Name": {"title": [{"text": {"content": make_short_name(full_title)}}]},
-        "Original Caption": {"rich_text": [{"text": {"content": full_title[:2000]}}]},
+        "Original Caption": {"rich_text": _rich_text_blocks(full_title)},
         "Link URL": {"url": row["URL"]},
         "Category": {"select": {"name": category}},
         "Timestamp": {"date": {"start": datetime.now().isoformat()[:10]}},
@@ -194,7 +202,7 @@ def create_notion_page(row: dict) -> bool:
 
     if row.get("Transcript"):
         properties["Transcript"] = {
-            "rich_text": [{"text": {"content": row["Transcript"][:2000]}}]
+            "rich_text": _rich_text_blocks(row["Transcript"])
         }
     if row.get("Views"):
         properties["Source Views"] = {

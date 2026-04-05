@@ -1,7 +1,7 @@
 # Autom8Lab Content Engine
 
-**Version:** 2.1.0
-**Last updated:** 2026-03-31
+**Version:** 2.3.0
+**Last updated:** 2026-04-05
 **Phase:** 2 — Content Agent (Conversational Sparring Partner)
 
 Turn raw video links (sent via Telegram) into classified knowledge, actionable content ideas, and platform-ready captions — with a conversational Content Agent that knows your brand, your backlog, and your principles. The agent gets smarter over time through 9 Obsidian knowledge files that compound across sessions.
@@ -20,10 +20,12 @@ Telegram Bot ──> Text file (backup) + Notion Links Queue*
   v
 Evening Pipeline (orchestrator.py)
   |
-  ├── YouTube Extractor ── auto-transcribes podcasts, YT shorts, long-form + descriptions
+  ├── TokScript MCP ────── extracts transcripts for ALL platforms (YouTube, TikTok, IG)
+  │                         via Claude CLI subprocess + TokScript MCP tools
   ├── Spotify Converter ── finds YouTube version of Spotify podcasts
-  ├── TokScript Parser ─── parses CSV exports for TikTok/IG transcripts + captions
+  ├── TokScript CSV ────── fallback: parses CSV exports if MCP unavailable
   └── Classifier v2 ────── auto-tags with non-exclusive knowledge tags + writes to Obsidian
+  |                         via OpenRouter API (free Qwen model, zero Claude tokens)
   |                         (ai_knowledge, business_knowledge, content_lesson, hook_pattern,
   |                          tool_discovery, content_idea, workflow, knowledge_nugget, news)
   v
@@ -65,6 +67,7 @@ The Content Agent is an upgrade from a capture-and-process tool into a conversat
 |---------|-------------|
 | `/ca-help` | Show all Content Agent commands and usage tips |
 | `/ca-brief` | Morning content brief — pipeline status, top ideas, one principle, one tool |
+| `/ca-extract` | Extract transcripts from pending links via TokScript MCP (all platforms) |
 | `/ca-classify` | Run the classifier on transcribed links — auto-tag and extract to knowledge files |
 | `/ca-ideate` | Generate content ideas from queued links or a freeform topic, informed by knowledge files |
 | `/ca-research` | Research a topic for content angles — search web, save findings to knowledge files |
@@ -78,8 +81,7 @@ The Content Agent is an upgrade from a capture-and-process tool into a conversat
 | Morning | Get a content brief | `/ca-brief` in Claude Code — pipeline status, top 3 ideas to film, one principle, one tool |
 | During the day | Save links | Send to Telegram bot |
 | During the day | Freeform ideation or hook refinement | `/ca-sparring` or `/ca-research` in Claude Code |
-| Evening | Export TikToks/Reels | TokScript: paste links → export CSV → drop in `csv_inbox/` |
-| Evening | Run pipeline | `python orchestrator.py` — extracts transcripts + classifies + writes to Obsidian |
+| Evening | Run pipeline | `python orchestrator.py` — extracts transcripts (all platforms via MCP) + classifies + writes to Obsidian |
 | Evening | Triage links | In Notion, set each classified link to `generate_ideas`, `learning`, `inspiration`, `postponed`, or `other` |
 | Evening | Generate ideas | `python engines/ideation.py` or `/ca-ideate` |
 | Evening | Review ideas | Dashboard at `localhost:8088` — filter, sort, score, review |
@@ -182,6 +184,9 @@ cp .env.example .env
 #   NOTION_LINKS_DB_ID
 #   NOTION_IDEAS_DB_ID
 #   OBSIDIAN_VAULT_PATH  (path to your Obsidian vault)
+#   OPENROUTER_API_KEY   (for classifier — uses free Qwen model)
+#   CLASSIFIER_MODEL     (default: qwen/qwen3.6-plus:free)
+#   CLASSIFIER_DELAY     (seconds between API calls, default: 5)
 ```
 
 ### 3. Run the Telegram bot
@@ -207,11 +212,11 @@ python orchestrator.py --status  # Show current queue counts
 ### 6. Run extractors individually (optional)
 
 ```bash
-python extractors/youtube.py                # Transcribe all pending YouTube links
-python extractors/youtube.py URL            # Transcribe a single URL
+python extractors/youtube.py                # Extract all pending YouTube links via TokScript MCP
+python extractors/youtube.py URL            # Extract a single URL via TokScript MCP
 python extractors/youtube.py --dry-run      # Preview pending YouTube links
 
-python extractors/tokscript_parser.py       # Parse all CSVs in csv_inbox/
+python extractors/tokscript_parser.py       # Parse all CSVs in csv_inbox/ (fallback)
 
 python extractors/spotify_to_youtube.py          # Convert all pending Spotify podcasts
 python extractors/spotify_to_youtube.py URL      # Convert a single Spotify URL
@@ -221,7 +226,9 @@ python extractors/spotify_to_youtube.py --dry-run # Preview pending Spotify link
 ### 7. Run the classifier (optional, runs automatically in orchestrator)
 
 ```bash
-python engines/classifier.py                # Classify all transcribed links
+python engines/classifier.py                # Classify all transcribed links (via OpenRouter)
+python engines/classifier.py --limit=10     # Classify only the first N links
+python engines/classifier.py --retry-errors # Retry links that failed classification
 python engines/classifier.py --list         # List links pending classification
 python engines/classifier.py --id PAGE_ID   # Classify a specific link
 python engines/classifier.py --dry-run      # Preview what would be classified
@@ -263,11 +270,12 @@ python engines/captions.py --id PAGE_ID     # Generate captions for a specific i
 
 | Type | Detected From | Notion Category | Notion on save? | Transcribed by |
 |------|---------------|-----------------|-----------------|----------------|
-| TikToks | `tiktok.com`, `vm.tiktok.com` | tiktok | No (text file only) | TokScript CSV |
-| Reels | `instagram.com/reel/` | reels | No (text file only) | TokScript CSV |
-| YT Shorts | `youtube.com/shorts/` | yt_shorts | Yes | YouTube extractor |
+| TikToks | `tiktok.com`, `vm.tiktok.com` | tiktok | No (text file only) | TokScript MCP |
+| Reels | `instagram.com/reel/` | reels | No (text file only) | TokScript MCP |
+| YT Shorts | `youtube.com/shorts/` | yt_shorts | Yes | TokScript MCP |
+| Long-form YT | `youtube.com/watch`, `youtu.be` | podcast / long_form | Yes | TokScript MCP |
 | Carousels | `instagram.com/p/` | carousel | Yes | — |
-| Podcasts | `youtube.com/watch`, `youtu.be`, `spotify.com` | podcast | Yes | YouTube extractor (Spotify converted first) |
+| Podcasts | `spotify.com` | podcast | Yes | Spotify converter → TokScript MCP |
 | X Posts | `twitter.com`, `x.com` | x_post | Yes | — |
 | LinkedIn | `linkedin.com/posts`, `linkedin.com/feed/update` | linkedin | Yes | — |
 | Reddit | `reddit.com` | reddit | Yes | — |
@@ -316,12 +324,13 @@ content-pipeline-bot/
 │   └── main.py                       # Bot handlers, Notion sync, /note support
 │
 ├── extractors/                       # Transcript extraction tools
-│   ├── youtube.py                    # YouTube transcripts + descriptions via youtube-transcript-api + yt-dlp
-│   ├── tokscript_parser.py           # TokScript CSV parser for TikTok/IG transcripts + captions
+│   ├── youtube.py                    # YouTube transcripts via TokScript MCP (Claude CLI subprocess)
+│   ├── tokscript_parser.py           # TokScript CSV parser — fallback for TikTok/IG transcripts
+│   ├── mcp_normalizer.py             # Normalizes TokScript MCP responses + platform detection
 │   └── spotify_to_youtube.py         # Spotify podcast > YouTube URL converter
 │
 ├── engines/                          # Pipeline engines
-│   ├── classifier.py                 # Classifier v2: non-exclusive tags, knowledge extraction, Obsidian writes
+│   ├── classifier.py                 # Classifier v2: OpenRouter API (Qwen), non-exclusive tags, knowledge extraction, Obsidian writes
 │   ├── ideation.py                   # 4-skill ideation pipeline (or --legacy for single-shot)
 │   └── captions.py                   # Filmed idea > platform captions
 │
@@ -339,6 +348,7 @@ content-pipeline-bot/
 ├── skills/                           # Claude Code /ca-* skill definitions
 │   ├── ca-help.md                    # Show all commands and usage tips
 │   ├── ca-brief.md                   # Morning content brief skill
+│   ├── ca-extract.md                 # Extract transcripts via TokScript MCP (all platforms)
 │   ├── ca-classify.md                # Interactive classifier skill
 │   ├── ca-ideate.md                  # Ideation from queued links or a topic
 │   ├── ca-research.md                # Research a topic, save to knowledge files
@@ -360,13 +370,14 @@ content-pipeline-bot/
 ├── tests/                            # Test suite
 │   └── test_classifier.py            # 27 tests: parsing, formatting, dedup, all tag types
 │
-├── orchestrator.py                   # Evening pipeline (CSV + YouTube + classification + summary)
+├── orchestrator.py                   # Evening pipeline (MCP extraction + CSV fallback + classification)
 ├── run.sh                            # Single-command startup (builds frontend + starts API)
-├── csv_inbox/                        # Drop TokScript CSVs here
-│   └── processed/                    # Processed CSVs moved here automatically
+├── csv_inbox/                        # Drop TokScript CSVs here (fallback if MCP unavailable)
+│   ├── processed/                    # Processed CSVs moved here automatically
+│   └── mcp_extracts/                 # Backup JSONs from MCP extraction runs
 ├── links/                            # Text file backups (legacy, still written to)
 ├── migrate_links.py                  # One-time migration script (already run)
-└── upload_to_notion.py               # Legacy TokScript uploader (deprecated)
+└── upload_to_notion.py               # TokScript CSV bulk uploader — uploads CSV exports to Notion Links Queue
 ```
 
 ---
@@ -379,10 +390,11 @@ content-pipeline-bot/
 - **Notion API** (REST) for database reads/writes from bot + scripts
 - **Notion MCP** for database creation, views, bulk operations via Claude Code
 - **Obsidian** for knowledge file storage (synced via iCloud)
-- **youtube-transcript-api** for YouTube transcript extraction
-- **yt-dlp** for video metadata + YouTube search (Spotify converter)
+- **TokScript MCP** for transcript extraction across all platforms (YouTube, TikTok, Instagram)
+- **OpenRouter API** for classification (free Qwen model — zero Claude token cost, 30s retry backoff on rate limits)
+- **Claude CLI** (`claude -p --model sonnet`) for MCP extraction subprocess and ideation
+- **yt-dlp** for YouTube search (Spotify converter)
 - **Spotify oEmbed API** for podcast episode metadata (no auth needed)
-- **Claude CLI** (`claude --model sonnet`) for classification and ideation prompts
 - **Claude Code** for interactive ideation (4-skill pipeline), caption generation, and Content Agent skills
 
 ---
@@ -391,6 +403,8 @@ content-pipeline-bot/
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 2.3.0 | 2026-04-05 | OpenRouter integration: classifier now uses OpenRouter API with free Qwen model (`qwen/qwen3.6-plus:free`) instead of Claude CLI subprocess — zero Claude token cost for classification. 30s retry backoff on 429 rate limits. New `--limit=N` flag for batch-size control. `--retry-errors` flag for re-running failed links. Configurable delay between API calls (`CLASSIFIER_DELAY`). `upload_to_notion.py` CSV uploader for TokScript bulk exports. |
+| 2.2.0 | 2026-04-05 | TokScript MCP integration: all transcript extraction (YouTube, TikTok, Instagram) now runs via TokScript MCP tools through Claude CLI subprocess — no more manual CSV exports or youtube-transcript-api IP blocks. Full transcripts saved to Notion (multi-block rich_text, up to 100K chars). New `/ca-extract` skill for interactive MCP extraction. `mcp_normalizer.py` for response normalization. Legacy youtube-transcript-api + yt-dlp code preserved as commented reference. |
 | 2.1.0 | 2026-03-31 | Classifier v2: 4 new knowledge tag types (ai_knowledge, business_knowledge, knowledge_nugget, news), non-exclusive tagging with per-file framing, Obsidian #tags on every entry, heading-based deduplication, news date stamps. 9 Obsidian knowledge files. Notion Content Tags updated. 27 tests. |
 | 2.0.0 | 2026-03-29 | Content Agent upgrade: classifier engine, auto-classification in orchestrator, 7 /ca-* skills, knowledge files system (Obsidian vault + local fallback), classify_prompt.md. React + FastAPI dashboard with FilterBar, IdeaCard, IdeaDetail. `run.sh` for single-command startup. |
 | 1.3.0 | 2026-03-18 | 4-skill ideation pipeline: content-idea-generator → viral-hook-creator → creative-director → de-ai-ify. Score, Top Pick, Filming Setup, Filming Priority fields. Morning Menu view sorted by score. |
