@@ -17,10 +17,13 @@ import os
 import requests
 from datetime import datetime
 from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).parent / ".env")
 
 # ============ CONFIGURATION ============
-NOTION_API_KEY = "REDACTED"  # You'll need to add this
-NOTION_DATABASE_ID = "2ffa44c6f32f8090a6f5d4dc01d76792"
+NOTION_API_KEY = os.getenv("NOTION_API_KEY")
+NOTION_DATABASE_ID = os.getenv("NOTION_LINKS_DB_ID")
 PENDING_LINKS_FILE = Path(__file__).parent / "links" / "pending_shorts.txt"
 # =======================================
 
