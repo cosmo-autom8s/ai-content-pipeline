@@ -254,13 +254,18 @@ python engines/ideation.py --legacy         # Legacy single-shot prompt mode
 python engines/ideation.py --save '{"page_id":"...","url":"..."}' '[...]'  # Save approved ideas
 ```
 
+`--save` now validates idea payloads, skips obvious duplicates for the same source, and only marks the source link `processed` if at least one new idea is actually created.
+
 ### 10. Run captions (via Claude Code)
 
 ```bash
 python engines/captions.py --list           # List filmed ideas ready for captions
 python engines/captions.py --id PAGE_ID     # Generate captions for a specific idea
-python engines/captions.py --save PAGE_ID '{"caption_tiktok":"...","caption_instagram":"...","caption_youtube":"...","caption_linkedin":"..."}'
+python engines/captions.py --save PAGE_ID '{"caption_tiktok":"...","caption_instagram":"..."}'
+python engines/captions.py --save PAGE_ID '{"caption_tiktok":"...","caption_youtube":{"title":"...","description":"..."},"mark_captioned":true}'
 ```
+
+Caption saves support partial updates. Status stays unchanged unless you explicitly pass either `"mark_captioned": true` or `"status": "captioned"`.
 
 ---
 
@@ -317,6 +322,11 @@ Generated ideas linked back to source material. Each idea has a short title, des
 - **Filming Priority** — `film_now` (red), `film_soon` (orange), `batch_next` (blue), `shelved` (gray)
 
 **Statuses:** `new` > `queued` > `filming_today` > `filmed` > `captioned` > `posted` > `archived`
+
+**Caption save notes:**
+- `Caption TikTok`, `Caption Instagram`, and `Caption LinkedIn` are saved as plain rich text.
+- `Caption YouTube` is stored as a single rich text field, but the save command accepts either a plain string or an object with `title` and `description`.
+- Saving one platform does not automatically advance the status.
 
 ---
 

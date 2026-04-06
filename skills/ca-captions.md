@@ -55,7 +55,8 @@ Make requested revisions before saving.
 
 For each approved set, update the idea's Notion page via Notion MCP or:
 
-- `python engines/captions.py --save <PAGE_ID> '{"caption_tiktok":"...","caption_instagram":"...","caption_youtube":"...","caption_linkedin":"..."}'`
+- `python engines/captions.py --save <PAGE_ID> '{"caption_tiktok":"...","caption_instagram":"..."}'`
+- `python engines/captions.py --save <PAGE_ID> '{"caption_youtube":{"title":"...","description":"..."},"caption_linkedin":"...","mark_captioned":true}'`
 
 Update fields:
 - `caption_tiktok`
@@ -63,4 +64,10 @@ Update fields:
 - `caption_youtube`
 - `caption_linkedin`
 
-Confirm how many ideas were updated and offer to mark them as `captioned` if they're fully done.
+Important save behavior:
+- partial saves are allowed
+- `caption_youtube` may be either a plain string or an object with `title` and `description`
+- status does not change automatically
+- to move an idea to `captioned`, pass `"mark_captioned": true` or `"status": "captioned"` explicitly
+
+Confirm how many ideas were updated and whether any should now be marked `captioned`.

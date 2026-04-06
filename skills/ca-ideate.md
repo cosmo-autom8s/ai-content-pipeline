@@ -49,4 +49,14 @@ For each approved idea, save it using one of:
 - `python engines/ideation.py --save '{"page_id":"<SOURCE_PAGE_ID>","url":"<SOURCE_URL>"}' '[...]'`
 - Notion MCP — create a new page in the Ideas database with all fields from the pipeline output format
 
-Confirm how many ideas were saved and offer to queue them for filming.
+Before saving, make sure each idea has at minimum:
+- `description`
+- preferably `name`
+- optional `hook_1` through `hook_5`, `angle`, `format`, `urgency`, `reasoning`, `score`, `top_pick`, `filming_setup`, `filming_priority`, `frame_type`, `topic_cluster`
+
+Important save behavior:
+- `engines/ideation.py --save` validates the payload and skips malformed ideas
+- it skips duplicates for the same source using normalized `name + description`
+- it marks the source link `processed` only if at least one new idea is actually created
+
+Confirm how many ideas were saved, how many were skipped, and offer to queue the saved ones for filming.
