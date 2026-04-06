@@ -19,15 +19,13 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 
 import requests
 from dotenv import load_dotenv
 
-from extractors.mcp_normalizer import parse_extract_result_output, save_backup, save_raw_output
+from extractors.runtime import run_extraction_backend
 
 # Load .env from project root
 env_path = Path(__file__).parent.parent / ".env"
@@ -48,7 +46,6 @@ YOUTUBE_ID_PATTERNS = [
     re.compile(r"youtu\.be/([a-zA-Z0-9_-]{11})"),
 ]
 
-CLAUDE_CLI = shutil.which("claude")
 MCP_BACKUP_DIR = Path(__file__).parent.parent / "csv_inbox" / "mcp_extracts"
 
 
@@ -61,121 +58,13 @@ def extract_video_id(url: str) -> str | None:
     return None
 
 
-# ---------------------------------------------------------------------------
-# TokScript MCP extraction (active) — uses Claude CLI subprocess
-# ---------------------------------------------------------------------------
-
-def _build_mcp_prompt(links: list[dict]) -> str:
-    """Build prompt for Claude CLI to extract YouTube transcripts via TokScript MCP."""
-    urls_block = "\n".join(
-        f"- page_id: {l['page_id']} | url: {l['url']} | name: {l['name'][:60]}"
-        for l in links
-    )
-    return f"""You are a transcript extraction worker. Extract transcripts for the following YouTube links using TokScript MCP tools, then update each Notion page.
-
-## Links to process
-{urls_block}
-
-## Instructions
-For each link:
-1. Call mcp__claude_ai_Tokscript__get_youtube_transcript with the video URL and format: "json".
-2. From the response, extract: title, author.username, duration, views, transcript.segments (join all segment texts with spaces).
-3. Update the Notion page (use the page_id) via mcp__claude_ai_Notion__notion-update-page:
-   - Set Status to "transcribed"
-   - Set Transcript to all transcript segment texts joined with spaces (send the FULL transcript, do NOT truncate)
-   - Set Name to first 60 chars of the title (break at word boundary)
-   - Set "Original Caption" to the video description or full title (send full text, do NOT truncate)
-   - Set "Source Views" to the view count as a string
-   - Set Duration to the duration formatted like "38:06" or "64.9s"
-   - Set Author to the author username
-
-Process all links. Call multiple MCP tools in parallel where possible.
-
-After processing all links, output a JSON summary as the LAST line of your response, in this exact format:
-EXTRACT_RESULT::{{"extracted": N, "failed": N, "details": [{{"url": "...", "status": "ok"|"error", "title": "...", "error": "..."}}]}}
-"""
-
-
 def process_links_via_mcp(links: list[dict], dry_run: bool = False) -> int:
-    """Extract YouTube transcripts via Claude CLI + TokScript MCP.
+    """Extract YouTube transcripts via the configured shared extraction backend.
 
     Returns the number of successfully extracted links.
     """
-    if not links:
-        return 0
-
-    if not CLAUDE_CLI:
-        print("  claude CLI not found in PATH — cannot run MCP extraction")
-        return 0
-
-    if dry_run:
-        print(f"  (dry run — would extract {len(links)} link(s) via MCP)")
-        return 0
-
-    print(f"  Extracting {len(links)} YouTube link(s) via Claude CLI + TokScript MCP...")
-
-    prompt = _build_mcp_prompt(links)
-
-    cmd = [
-        CLAUDE_CLI,
-        "-p", prompt,
-        "--model", "sonnet",
-        "--output-format", "text",
-        "--max-budget-usd", "0.50",
-        "--permission-mode", "bypassPermissions",
-        "--allowedTools",
-        "mcp__claude_ai_Tokscript__get_youtube_transcript",
-        "mcp__claude_ai_Notion__notion-update-page",
-    ]
-
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=300,
-            cwd=str(Path(__file__).parent.parent),
-        )
-    except subprocess.TimeoutExpired:
-        print("  MCP extraction timed out after 5 minutes")
-        return 0
-
-    if result.returncode != 0:
-        print(f"  Claude CLI exited with code {result.returncode}")
-        if result.stderr:
-            print(f"  stderr: {result.stderr[:300]}")
-        return 0
-
-    output = result.stdout
-
-    raw_backup_path = save_raw_output(output, "yt_extract", MCP_BACKUP_DIR)
-    summary = parse_extract_result_output(output, links)
-    json_backup_path = save_backup(
-        [{
-            "kind": "youtube_extract",
-            "links": links,
-            "summary": summary,
-            "raw_output_path": str(raw_backup_path),
-        }],
-        MCP_BACKUP_DIR,
-    )
-
-    for detail in summary["details"]:
-        status_icon = "ok" if detail["status"] == "ok" else "FAIL"
-        title = detail.get("title", detail.get("url", ""))[:50]
-        msg = f"    [{status_icon}] {title}"
-        if detail.get("error"):
-            msg += f" — {detail['error']}"
-        print(msg)
-
-    if not summary["parsed"]:
-        print("  Could not parse extraction result summary — marked batch as failed in structured backup")
-    elif summary["failed"]:
-        print(f"\n  {summary['failed']} link(s) failed — check backup: {json_backup_path}")
-
-    print(f"  Raw backup saved: {raw_backup_path}")
-    print(f"  Structured backup saved: {json_backup_path}")
-    return summary["extracted"]
+    print("  Extracting YouTube links via shared extraction backend...")
+    return run_extraction_backend(links, "youtube", dry_run=dry_run, backup_dir=MCP_BACKUP_DIR)
 
 
 # ---------------------------------------------------------------------------

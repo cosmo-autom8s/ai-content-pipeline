@@ -233,6 +233,21 @@ python extractors/spotify_to_youtube.py URL      # Convert a single Spotify URL
 python extractors/spotify_to_youtube.py --dry-run # Preview pending Spotify links
 ```
 
+Transcript extraction uses a shared runtime layer so the same repo can be operated by Claude or Codex without forking the core pipeline logic.
+
+Relevant env vars:
+- `AGENT_RUNTIME=claude|codex`
+- `EXTRACTOR_BACKEND=claude_cli|agent_prompt`
+- `EXTRACTOR_MODEL=sonnet`
+- `EXTRACTOR_BATCH_SIZE=10`
+- `EXTRACTOR_BUDGET_USD=0.5`
+
+Recommended defaults:
+- Claude session: `AGENT_RUNTIME=claude`, leave `EXTRACTOR_BACKEND` empty or set it to `claude_cli`
+- Codex session: `AGENT_RUNTIME=codex`, set `EXTRACTOR_BACKEND=agent_prompt`
+
+`agent_prompt` writes a runtime-specific extraction prompt into `csv_inbox/mcp_extracts/` for an agent session to execute manually. This is the current Codex-compatible bridge until extraction is fully decoupled from subprocess-based agent execution.
+
 ### 8. Run the classifier (optional, runs automatically in orchestrator)
 
 ```bash
