@@ -190,13 +190,22 @@ cp .env.example .env
 #   CLASSIFIER_DELAY     (seconds between API calls, default: 5)
 ```
 
-### 3. Run the Telegram bot
+### 3. Validate the environment
+
+```bash
+python validate_env.py
+python validate_env.py --skip-network
+```
+
+`validate_env.py` checks `.env`, the Obsidian vault path, Notion API access, and OpenRouter auth. TokScript/Notion MCP access must be validated from the active agent session.
+
+### 4. Run the Telegram bot
 
 ```bash
 python bot/main.py
 ```
 
-### 4. Run the evening pipeline
+### 5. Run the evening pipeline
 
 ```bash
 python orchestrator.py           # Full pipeline: CSV inbox + YouTube extraction + classification
@@ -204,13 +213,13 @@ python orchestrator.py --dry-run # Preview what would be processed
 python orchestrator.py --status  # Show current queue counts
 ```
 
-### 5. Run the dashboard
+### 6. Run the dashboard
 
 ```bash
 ./run.sh                         # Builds frontend + starts API on port 8088
 ```
 
-### 6. Run extractors individually (optional)
+### 7. Run extractors individually (optional)
 
 ```bash
 python extractors/youtube.py                # Extract all pending YouTube links via TokScript MCP
@@ -224,7 +233,7 @@ python extractors/spotify_to_youtube.py URL      # Convert a single Spotify URL
 python extractors/spotify_to_youtube.py --dry-run # Preview pending Spotify links
 ```
 
-### 7. Run the classifier (optional, runs automatically in orchestrator)
+### 8. Run the classifier (optional, runs automatically in orchestrator)
 
 ```bash
 python engines/classifier.py                # Classify all transcribed links (via OpenRouter)
@@ -235,7 +244,7 @@ python engines/classifier.py --id PAGE_ID   # Classify a specific link
 python engines/classifier.py --dry-run      # Preview what would be classified
 ```
 
-### 8. Run ideation pipeline (via Claude Code)
+### 9. Run ideation pipeline (via Claude Code)
 
 ```bash
 python engines/ideation.py                  # Pipeline mode (default): 4-skill ideation
@@ -245,7 +254,7 @@ python engines/ideation.py --legacy         # Legacy single-shot prompt mode
 python engines/ideation.py --save '{"page_id":"...","url":"..."}' '[...]'  # Save approved ideas
 ```
 
-### 9. Run captions (via Claude Code)
+### 10. Run captions (via Claude Code)
 
 ```bash
 python engines/captions.py --list           # List filmed ideas ready for captions
