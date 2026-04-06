@@ -419,14 +419,21 @@ def main():
         if youtube_links:
             print(f"Processing {len(youtube_links)} YouTube link(s) via MCP...")
             yt_success = process_links_via_mcp(youtube_links, dry_run)
+            youtube_note = "dry run" if dry_run else ""
+            youtube_completed = None if dry_run else yt_success
+            if runtime_config.extractor_backend == "agent_prompt" and not dry_run:
+                print(f"YouTube extraction: queued {len(youtube_links)} job link(s) for agent execution")
+                youtube_note = "queued as extraction jobs"
+                youtube_completed = len(youtube_links)
             if not dry_run:
-                print(f"YouTube extraction: {yt_success}/{len(youtube_links)} successful")
+                if runtime_config.extractor_backend != "agent_prompt":
+                    print(f"YouTube extraction: {yt_success}/{len(youtube_links)} successful")
             stage_results.append(
                 print_stage_result(
                     "YouTube extraction",
                     len(youtube_links),
-                    None if dry_run else yt_success,
-                    "dry run" if dry_run else "",
+                    youtube_completed,
+                    youtube_note,
                 )
             )
             print()
@@ -437,14 +444,21 @@ def main():
         if manual_links:
             print(f"Processing {len(manual_links)} short-form link(s) via MCP...")
             mcp_success = extract_shortform_via_mcp(manual_links, dry_run)
+            shortform_note = "dry run" if dry_run else ""
+            shortform_completed = None if dry_run else mcp_success
+            if runtime_config.extractor_backend == "agent_prompt" and not dry_run:
+                print(f"MCP extraction: queued {len(manual_links)} job link(s) for agent execution")
+                shortform_note = "queued as extraction jobs"
+                shortform_completed = len(manual_links)
             if not dry_run:
-                print(f"MCP extraction: {mcp_success}/{len(manual_links)} successful")
+                if runtime_config.extractor_backend != "agent_prompt":
+                    print(f"MCP extraction: {mcp_success}/{len(manual_links)} successful")
             stage_results.append(
                 print_stage_result(
                     "Short-form extraction",
                     len(manual_links),
-                    None if dry_run else mcp_success,
-                    "dry run" if dry_run else "",
+                    shortform_completed,
+                    shortform_note,
                 )
             )
             print()

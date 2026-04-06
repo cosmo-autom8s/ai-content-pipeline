@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from extractors.mcp_normalizer import parse_extract_result_output, save_backup, save_raw_output
@@ -15,6 +16,7 @@ from extractors.mcp_normalizer import parse_extract_result_output, save_backup, 
 
 PROJECT_ROOT = Path(__file__).parent.parent
 DEFAULT_BACKUP_DIR = PROJECT_ROOT / "csv_inbox" / "mcp_extracts"
+DEFAULT_JOB_DIR = PROJECT_ROOT / "csv_inbox" / "extraction_jobs"
 DEFAULT_BATCH_SIZE = 10
 DEFAULT_BUDGET_USD = 0.50
 DEFAULT_MODEL = "sonnet"
@@ -157,6 +159,43 @@ def _write_prompt_artifacts(
     return prompt_path
 
 
+def create_extraction_job(
+    links: list[dict],
+    scope: str,
+    prompt: str,
+    config: ExtractorRuntimeConfig,
+    *,
+    backup_dir: Path | None = None,
+    job_dir: Path | None = None,
+) -> Path:
+    """Create a structured extraction job for agent_prompt workflows."""
+    target_backup_dir = backup_dir or DEFAULT_BACKUP_DIR
+    target_job_dir = job_dir or DEFAULT_JOB_DIR
+    prompt_path = _write_prompt_artifacts(links, scope, prompt, target_backup_dir, config)
+
+    target_job_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    job_id = f"{scope}_{config.agent_runtime}_{timestamp}"
+    job_path = target_job_dir / f"{job_id}.json"
+    job_path.write_text(
+        json.dumps(
+            {
+                "job_id": job_id,
+                "status": "pending",
+                "scope": scope,
+                "agent_runtime": config.agent_runtime,
+                "extractor_backend": config.extractor_backend,
+                "prompt_path": str(prompt_path),
+                "links": links,
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    return job_path
+
+
 def run_extraction_backend(
     links: list[dict],
     scope: str,
@@ -178,9 +217,9 @@ def run_extraction_backend(
         return 0
 
     if cfg.extractor_backend == "agent_prompt":
-        prompt_path = _write_prompt_artifacts(links, scope, prompt, target_backup_dir, cfg)
+        job_path = create_extraction_job(links, scope, prompt, cfg, backup_dir=target_backup_dir)
         print("  Agent prompt backend selected — no subprocess execution")
-        print(f"  Prompt saved: {prompt_path}")
+        print(f"  Extraction job queued: {job_path}")
         return 0
 
     if cfg.extractor_backend != "claude_cli":

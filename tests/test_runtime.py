@@ -2,7 +2,10 @@
 
 from unittest.mock import patch
 
-from extractors.runtime import build_extract_worker_prompt, get_runtime_config
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from extractors.runtime import build_extract_worker_prompt, create_extraction_job, get_runtime_config
 
 
 def test_get_runtime_config_defaults_to_claude_cli_for_claude_runtime():
@@ -54,3 +57,24 @@ def test_build_extract_worker_prompt_uses_claude_tool_names():
 
     assert "mcp__claude_ai_Tokscript__get_tiktok_transcript" in prompt
     assert "mcp__claude_ai_Notion__notion-update-page" in prompt
+
+
+def test_create_extraction_job_writes_pending_job_file():
+    with TemporaryDirectory() as temp_dir:
+        base = Path(temp_dir)
+        backup_dir = base / "backups"
+        job_dir = base / "jobs"
+        config = get_runtime_config()
+        job_path = create_extraction_job(
+            [{"page_id": "abc", "url": "https://youtu.be/12345678901", "name": "Video"}],
+            "youtube",
+            "prompt text",
+            config,
+            backup_dir=backup_dir,
+            job_dir=job_dir,
+        )
+
+        payload = job_path.read_text(encoding="utf-8")
+        assert job_path.exists()
+        assert "\"status\": \"pending\"" in payload
+        assert "\"scope\": \"youtube\"" in payload

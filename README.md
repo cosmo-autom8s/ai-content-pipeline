@@ -248,6 +248,13 @@ Recommended defaults:
 
 `agent_prompt` writes a runtime-specific extraction prompt into `csv_inbox/mcp_extracts/` for an agent session to execute manually. This is the current Codex-compatible bridge until extraction is fully decoupled from subprocess-based agent execution.
 
+Queued prompt jobs can be inspected with:
+
+```bash
+python extractors/extraction_jobs.py       # List pending extraction jobs
+python extractors/extraction_jobs.py --id JOB_ID
+```
+
 ### 8. Run the classifier (optional, runs automatically in orchestrator)
 
 ```bash
