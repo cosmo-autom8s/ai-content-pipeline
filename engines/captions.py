@@ -19,6 +19,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 import requests
 from dotenv import load_dotenv
@@ -37,6 +38,7 @@ NOTION_HEADERS = {
 }
 
 PROMPT_TEMPLATE = (Path(__file__).parent.parent / "prompts" / "captions.txt").read_text()
+ALLOWED_STATUSES = {"new", "queued", "filming_today", "filmed", "captioned", "posted", "archived"}
 
 
 def _parse_json_arg(raw: str) -> dict:
@@ -48,6 +50,59 @@ def _parse_json_arg(raw: str) -> dict:
     if not isinstance(data, dict):
         raise ValueError("Captions JSON must be an object.")
     return data
+
+
+def _normalize_text(value: Any, limit: int = 2000) -> str:
+    """Normalize text content before writing to Notion."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()[:limit]
+    return str(value).strip()[:limit]
+
+
+def normalize_captions_payload(payload: dict) -> dict:
+    """Validate and normalize caption payloads from CLI/LLM output."""
+    if not isinstance(payload, dict):
+        raise ValueError("Captions JSON must be an object.")
+
+    normalized: dict[str, Any] = {}
+    platform_keys = (
+        "caption_tiktok",
+        "caption_instagram",
+        "caption_youtube",
+        "caption_linkedin",
+    )
+
+    for key in platform_keys:
+        value = payload.get(key)
+        if key == "caption_youtube" and isinstance(value, dict):
+            title = _normalize_text(value.get("title"), limit=300)
+            description = _normalize_text(value.get("description"))
+            if title and description:
+                normalized[key] = f"Title: {title}\n\nDescription: {description}"
+            elif title:
+                normalized[key] = f"Title: {title}"
+            elif description:
+                normalized[key] = f"Description: {description}"
+        else:
+            text = _normalize_text(value)
+            if text:
+                normalized[key] = text
+
+    if not any(normalized.get(key) for key in platform_keys):
+        raise ValueError("At least one non-empty caption is required.")
+
+    status = _normalize_text(payload.get("status"), limit=50)
+    mark_captioned = bool(payload.get("mark_captioned"))
+    if status and status not in ALLOWED_STATUSES:
+        raise ValueError(f"Invalid status: {status}")
+    if status:
+        normalized["status"] = status
+    elif mark_captioned:
+        normalized["status"] = "captioned"
+
+    return normalized
 
 
 def get_text_prop(props: dict, key: str) -> str:
@@ -160,18 +215,9 @@ def format_prompt(idea: dict) -> str:
     )
 
 
-def save_captions(page_id: str, captions_json: str) -> bool:
-    """Parse JSON captions and update the Content Ideas page."""
-    try:
-        captions = json.loads(captions_json)
-    except json.JSONDecodeError as e:
-        print(f"Error parsing captions JSON: {e}")
-        return False
-
-    properties = {
-        "Status": {"select": {"name": "captioned"}},
-    }
-
+def build_caption_properties(captions: dict) -> dict:
+    """Build Notion property updates for a normalized caption payload."""
+    properties = {}
     platform_fields = {
         "caption_tiktok": "Caption TikTok",
         "caption_instagram": "Caption Instagram",
@@ -186,6 +232,32 @@ def save_captions(page_id: str, captions_json: str) -> bool:
                 "rich_text": [{"text": {"content": text[:2000]}}]
             }
 
+    if captions.get("status"):
+        properties["Status"] = {"select": {"name": captions["status"]}}
+
+    return properties
+
+
+def save_captions(page_id: str, captions_json: str) -> bool:
+    """Parse JSON captions and update the Content Ideas page."""
+    try:
+        captions = json.loads(captions_json)
+    except json.JSONDecodeError as e:
+        print(f"Error parsing captions JSON: {e}")
+        return False
+
+    try:
+        normalized = normalize_captions_payload(captions)
+    except ValueError as exc:
+        print(exc)
+        return False
+
+    idea = get_idea_by_id(page_id)
+    if not idea:
+        print(f"Idea page not found: {page_id}")
+        return False
+
+    properties = build_caption_properties(normalized)
     resp = requests.patch(
         f"https://api.notion.com/v1/pages/{page_id}",
         headers=NOTION_HEADERS,
@@ -194,7 +266,11 @@ def save_captions(page_id: str, captions_json: str) -> bool:
     )
 
     if resp.status_code == 200:
-        print(f"  Captions saved, status → captioned")
+        platforms_saved = sum(1 for key in ("caption_tiktok", "caption_instagram", "caption_youtube", "caption_linkedin") if normalized.get(key))
+        if normalized.get("status"):
+            print(f"  Captions saved ({platforms_saved} platform(s)), status → {normalized['status']}")
+        else:
+            print(f"  Captions saved ({platforms_saved} platform(s)), status unchanged")
         return True
     else:
         print(f"  Error saving captions: {resp.status_code} {resp.text[:200]}")
@@ -207,7 +283,7 @@ def main():
     if "--save" in args:
         idx = args.index("--save")
         if idx + 2 >= len(args):
-            print("Usage: python engines/captions.py --save PAGE_ID '{\"caption_tiktok\":\"...\"}'")
+            print("Usage: python engines/captions.py --save PAGE_ID '{\"caption_tiktok\":\"...\",\"mark_captioned\":true}'")
             return
         page_id = args[idx + 1]
         try:
