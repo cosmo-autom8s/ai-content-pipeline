@@ -41,9 +41,50 @@ def list_jobs(job_dir: Path | None = None) -> list[dict]:
     return jobs
 
 
+def next_pending_job(job_dir: Path | None = None) -> dict | None:
+    """Return the oldest pending job, if any."""
+    pending_jobs = [
+        job for job in reversed(list_jobs(job_dir))
+        if job.get("status", "pending") == "pending"
+    ]
+    return pending_jobs[0] if pending_jobs else None
+
+
 def save_job(job_path: Path, job: dict) -> None:
     """Persist a job payload."""
     job_path.write_text(json.dumps(job, indent=2), encoding="utf-8")
+
+
+def claim_job(job_id: str, worker: str, *, job_dir: Path | None = None) -> dict:
+    """Mark a pending job as in progress for a named worker."""
+    job_path = find_job_path(job_id, job_dir)
+    if not job_path:
+        raise FileNotFoundError(f"Job not found: {job_id}")
+
+    job = load_job(job_path)
+    status = job.get("status", "pending")
+    if status not in {"pending", "in_progress"}:
+        raise ValueError(f"Cannot claim job in status: {status}")
+
+    job["status"] = "in_progress"
+    job["claimed_by"] = worker
+    job["claimed_at"] = datetime.now().isoformat(timespec="seconds")
+    save_job(job_path, job)
+    return job
+
+
+def release_job(job_id: str, *, job_dir: Path | None = None) -> dict:
+    """Release an in-progress job back to pending."""
+    job_path = find_job_path(job_id, job_dir)
+    if not job_path:
+        raise FileNotFoundError(f"Job not found: {job_id}")
+
+    job = load_job(job_path)
+    job["status"] = "pending"
+    job.pop("claimed_by", None)
+    job.pop("claimed_at", None)
+    save_job(job_path, job)
+    return job
 
 
 def complete_job_from_output(
@@ -75,6 +116,8 @@ def complete_job_from_output(
 
     job["status"] = "completed" if summary["parsed"] else "failed"
     job["completed_at"] = datetime.now().isoformat(timespec="seconds")
+    job.pop("claimed_by", None)
+    job.pop("claimed_at", None)
     job["result"] = {
         "parsed": summary["parsed"],
         "extracted": summary["extracted"],
@@ -96,6 +139,8 @@ def fail_job(job_id: str, error: str, *, job_dir: Path | None = None) -> dict:
     job = load_job(job_path)
     job["status"] = "failed"
     job["completed_at"] = datetime.now().isoformat(timespec="seconds")
+    job.pop("claimed_by", None)
+    job.pop("claimed_at", None)
     job["result"] = {
         "parsed": False,
         "extracted": 0,
@@ -110,11 +155,36 @@ def fail_job(job_id: str, error: str, *, job_dir: Path | None = None) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description="List, inspect, or complete queued extraction jobs.")
     parser.add_argument("--id", dest="job_id", help="Show a specific job by ID")
+    parser.add_argument("--next", action="store_true", help="Show the next pending job")
+    parser.add_argument("--claim", dest="claim_job_id", help="Claim a job for a worker")
+    parser.add_argument("--worker", dest="worker_name", help="Worker name for --claim")
+    parser.add_argument("--release", dest="release_job_id", help="Release an in-progress job back to pending")
     parser.add_argument("--complete", dest="complete_job_id", help="Mark a job completed from agent output")
     parser.add_argument("--output-file", dest="output_file", help="Path to raw agent output text for --complete")
     parser.add_argument("--fail", dest="fail_job_id", help="Mark a job failed")
     parser.add_argument("--error", dest="error_message", help="Error message for --fail")
     args = parser.parse_args()
+
+    if args.next:
+        job = next_pending_job()
+        if not job:
+            print("No pending extraction jobs.")
+            return
+        print(json.dumps(job, indent=2))
+        return
+
+    if args.claim_job_id:
+        if not args.worker_name:
+            print("--claim requires --worker")
+            return
+        job = claim_job(args.claim_job_id, args.worker_name)
+        print(json.dumps(job, indent=2))
+        return
+
+    if args.release_job_id:
+        job = release_job(args.release_job_id)
+        print(json.dumps(job, indent=2))
+        return
 
     if args.complete_job_id:
         if not args.output_file:
@@ -155,6 +225,8 @@ def main() -> None:
         print(f"  scope: {job.get('scope', '')}")
         print(f"  runtime: {job.get('agent_runtime', '')}")
         print(f"  links: {len(job.get('links', []))}")
+        if job.get("claimed_by"):
+            print(f"  claimed by: {job['claimed_by']} at {job.get('claimed_at', '')}")
         print(f"  prompt: {job.get('prompt_path', '')}")
         print(f"  created: {job.get('created_at', '')}")
 

@@ -5,7 +5,14 @@ from unittest.mock import patch
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from extractors.extraction_jobs import complete_job_from_output, fail_job, load_job
+from extractors.extraction_jobs import (
+    claim_job,
+    complete_job_from_output,
+    fail_job,
+    load_job,
+    next_pending_job,
+    release_job,
+)
 from extractors.runtime import build_extract_worker_prompt, create_extraction_job, get_runtime_config
 
 
@@ -128,3 +135,56 @@ def test_fail_job_marks_failed_with_error():
         job = load_job(job_path)
         assert job["status"] == "failed"
         assert job["result"]["error"] == "manual failure"
+
+
+def test_claim_and_release_job_round_trip():
+    with TemporaryDirectory() as temp_dir:
+        base = Path(temp_dir)
+        backup_dir = base / "backups"
+        job_dir = base / "jobs"
+        config = get_runtime_config()
+        job_path = create_extraction_job(
+            [{"page_id": "abc", "url": "https://youtu.be/12345678901", "name": "Video"}],
+            "youtube",
+            "prompt text",
+            config,
+            backup_dir=backup_dir,
+            job_dir=job_dir,
+        )
+
+        claimed = claim_job(job_path.stem, "codex", job_dir=job_dir)
+        assert claimed["status"] == "in_progress"
+        assert claimed["claimed_by"] == "codex"
+
+        released = release_job(job_path.stem, job_dir=job_dir)
+        assert released["status"] == "pending"
+        assert "claimed_by" not in released
+
+
+def test_next_pending_job_returns_oldest_pending():
+    with TemporaryDirectory() as temp_dir:
+        base = Path(temp_dir)
+        backup_dir = base / "backups"
+        job_dir = base / "jobs"
+        config = get_runtime_config()
+        first = create_extraction_job(
+            [{"page_id": "a", "url": "https://youtu.be/aaaaaaaaaaa", "name": "First"}],
+            "youtube",
+            "prompt one",
+            config,
+            backup_dir=backup_dir,
+            job_dir=job_dir,
+        )
+        second = create_extraction_job(
+            [{"page_id": "b", "url": "https://youtu.be/bbbbbbbbbbb", "name": "Second"}],
+            "youtube",
+            "prompt two",
+            config,
+            backup_dir=backup_dir,
+            job_dir=job_dir,
+        )
+
+        claim_job(first.stem, "codex", job_dir=job_dir)
+        job = next_pending_job(job_dir=job_dir)
+        assert job is not None
+        assert job["job_id"] == second.stem

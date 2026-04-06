@@ -174,7 +174,7 @@ def create_extraction_job(
     prompt_path = _write_prompt_artifacts(links, scope, prompt, target_backup_dir, config)
 
     target_job_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S_%f")
     job_id = f"{scope}_{config.agent_runtime}_{timestamp}"
     job_path = target_job_dir / f"{job_id}.json"
     job_path.write_text(

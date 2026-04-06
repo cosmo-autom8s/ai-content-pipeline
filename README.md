@@ -252,10 +252,20 @@ Queued prompt jobs can be inspected with:
 
 ```bash
 python extractors/extraction_jobs.py       # List pending extraction jobs
+python extractors/extraction_jobs.py --next
 python extractors/extraction_jobs.py --id JOB_ID
+python extractors/extraction_jobs.py --claim JOB_ID --worker codex
+python extractors/extraction_jobs.py --release JOB_ID
 python extractors/extraction_jobs.py --complete JOB_ID --output-file /path/to/agent_output.txt
 python extractors/extraction_jobs.py --fail JOB_ID --error "reason"
 ```
+
+Recommended Codex-native flow:
+1. `AGENT_RUNTIME=codex EXTRACTOR_BACKEND=agent_prompt python orchestrator.py`
+2. `python extractors/extraction_jobs.py --next`
+3. `python extractors/extraction_jobs.py --claim JOB_ID --worker codex`
+4. Run the job via Codex MCP tools
+5. `python extractors/extraction_jobs.py --complete JOB_ID --output-file /path/to/agent_output.txt`
 
 ### 8. Run the classifier (optional, runs automatically in orchestrator)
 
