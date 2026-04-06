@@ -413,11 +413,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         info = CONTENT_TYPES[content_type]
         last_saved[update.effective_chat.id] = content_type
 
-        # Save to Notion — skip TikToks and Reels (those get Notion rows via TokScript CSV)
-        # to avoid duplicates (bot stores shortened URLs, TokScript has full URLs)
-        notion_page_id = None
-        if content_type not in ("tiktoks", "reels"):
-            notion_page_id = save_to_notion(content_type, text)
+        # Save to Notion — all link types go to Notion now
+        # (TokScript MCP handles extraction directly, no more CSV-only path)
+        notion_page_id = save_to_notion(content_type, text)
         notion_flag = " 📋" if notion_page_id else ""
         if notion_page_id:
             last_notion_page[update.effective_chat.id] = notion_page_id

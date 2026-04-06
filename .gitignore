@@ -23,3 +23,7 @@ logs/
 csv_inbox/*.csv
 csv_inbox/processed/
 csv_inbox/mcp_extracts/
+
+# Sensitive / temp
+cookies.txt
+captions_debug.txt

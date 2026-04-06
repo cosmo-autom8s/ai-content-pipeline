@@ -53,9 +53,9 @@ NOTION_HEADERS = {
     "Notion-Version": "2022-06-28",
 }
 
-# Categories that can be auto-transcribed vs need manual work
-AUTO_CATEGORIES = {"podcast", "long_form"}
-MANUAL_CATEGORIES = {"short_form"}  # extracted via Claude CLI + TokScript MCP
+# Categories — all video types now go through TokScript MCP via Claude CLI
+AUTO_CATEGORIES = {"podcast", "long_form"}  # YouTube links — extracted via TokScript MCP
+MANUAL_CATEGORIES = {"short_form", "tiktok", "reels", "yt_shorts"}  # extracted via TokScript MCP
 SKIP_CATEGORIES = {"carousel", "x_post", "linkedin", "reddit"}
 
 
@@ -220,25 +220,11 @@ EXTRACT_RESULT::{{"extracted": N, "failed": N, "details": [{{"url": "...", "stat
 """
 
 
-def extract_shortform_via_mcp(links: list[dict], dry_run: bool = False) -> int:
-    """Extract transcripts for short-form links by shelling out to claude CLI with MCP tools.
+MCP_BATCH_SIZE = 10  # links per Claude CLI call
 
-    Returns the number of successfully extracted links.
-    """
-    if not links:
-        return 0
 
-    if not CLAUDE_CLI:
-        print("  claude CLI not found in PATH — skipping MCP extraction")
-        print("  Fallback: Export CSV from TokScript web → csv_inbox/")
-        return 0
-
-    if dry_run:
-        print(f"  (dry run — would extract {len(links)} link(s) via MCP)")
-        return 0
-
-    print(f"  Extracting {len(links)} link(s) via Claude CLI + TokScript MCP...")
-
+def _run_mcp_batch(links: list[dict]) -> int:
+    """Run a single MCP extraction batch via Claude CLI. Returns number extracted."""
     prompt = build_mcp_prompt(links)
 
     cmd = [
@@ -261,28 +247,28 @@ def extract_shortform_via_mcp(links: list[dict], dry_run: bool = False) -> int:
             cmd,
             capture_output=True,
             text=True,
-            timeout=300,  # 5 minute timeout
+            timeout=600,  # 10 minutes per batch (~30s per link for MCP + Notion update)
             cwd=str(Path(__file__).parent),
         )
     except subprocess.TimeoutExpired:
-        print("  MCP extraction timed out after 5 minutes")
+        print("    Batch timed out after 10 minutes")
         return 0
 
     if result.returncode != 0:
-        print(f"  Claude CLI exited with code {result.returncode}")
+        print(f"    Claude CLI exited with code {result.returncode}")
         if result.stderr:
-            print(f"  stderr: {result.stderr[:300]}")
+            print(f"    stderr: {result.stderr[:300]}")
         return 0
 
     output = result.stdout
 
-    # Save full output as backup
+    # Save backup
     MCP_BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
     backup_path = MCP_BACKUP_DIR / f"mcp_extract_{timestamp}.txt"
     backup_path.write_text(output, encoding="utf-8")
 
-    # Parse the result summary from the last line
+    # Parse result summary
     extracted = 0
     for line in reversed(output.splitlines()):
         if line.startswith("EXTRACT_RESULT::"):
@@ -301,20 +287,50 @@ def extract_shortform_via_mcp(links: list[dict], dry_run: bool = False) -> int:
                     print(msg)
 
                 if failed:
-                    print(f"\n  {failed} link(s) failed — check backup: {backup_path}")
+                    print(f"    {failed} link(s) failed — check backup: {backup_path}")
             except json.JSONDecodeError:
-                print("  Could not parse extraction result summary")
+                print("    Could not parse extraction result summary")
             break
     else:
-        # No EXTRACT_RESULT line found — count Notion updates from output
         extracted = output.count("transcribed")
         if extracted:
-            print(f"  Extraction completed (estimated {extracted} updates)")
+            print(f"    Batch completed (estimated {extracted} updates)")
         else:
-            print("  Extraction completed but could not verify results")
+            print("    Batch completed but could not verify results")
 
-    print(f"  Backup saved: {backup_path}")
     return extracted
+
+
+def extract_shortform_via_mcp(links: list[dict], dry_run: bool = False) -> int:
+    """Extract transcripts for short-form links by shelling out to claude CLI with MCP tools.
+
+    Processes links in batches of MCP_BATCH_SIZE to avoid timeouts and respect TokScript rate limits.
+    Returns the number of successfully extracted links.
+    """
+    if not links:
+        return 0
+
+    if not CLAUDE_CLI:
+        print("  claude CLI not found in PATH — skipping MCP extraction")
+        print("  Fallback: Export CSV from TokScript web → csv_inbox/")
+        return 0
+
+    if dry_run:
+        print(f"  (dry run — would extract {len(links)} link(s) via MCP)")
+        return 0
+
+    total_extracted = 0
+    batches = [links[i:i + MCP_BATCH_SIZE] for i in range(0, len(links), MCP_BATCH_SIZE)]
+
+    print(f"  Extracting {len(links)} link(s) via Claude CLI + TokScript MCP ({len(batches)} batch(es) of {MCP_BATCH_SIZE})...")
+
+    for batch_num, batch in enumerate(batches, 1):
+        print(f"\n  Batch {batch_num}/{len(batches)} ({len(batch)} links):")
+        extracted = _run_mcp_batch(batch)
+        total_extracted += extracted
+        print(f"    Batch result: {extracted}/{len(batch)} extracted")
+
+    return total_extracted
 
 
 def main():
