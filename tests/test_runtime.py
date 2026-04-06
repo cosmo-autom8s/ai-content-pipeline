@@ -6,12 +6,14 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from extractors.extraction_jobs import (
+    archive_stale_jobs,
     claim_job,
     complete_job_from_output,
     fail_job,
     load_job,
     next_pending_job,
     release_job,
+    stale_jobs,
 )
 from extractors.runtime import build_extract_worker_prompt, create_extraction_job, get_runtime_config
 
@@ -188,3 +190,55 @@ def test_next_pending_job_returns_oldest_pending():
         job = next_pending_job(job_dir=job_dir)
         assert job is not None
         assert job["job_id"] == second.stem
+
+
+def test_stale_jobs_detect_missing_pending_urls():
+    with TemporaryDirectory() as temp_dir:
+        base = Path(temp_dir)
+        backup_dir = base / "backups"
+        job_dir = base / "jobs"
+        config = get_runtime_config()
+        stale = create_extraction_job(
+            [{"page_id": "a", "url": "https://youtu.be/aaaaaaaaaaa", "name": "Stale"}],
+            "youtube",
+            "prompt one",
+            config,
+            backup_dir=backup_dir,
+            job_dir=job_dir,
+        )
+        create_extraction_job(
+            [{"page_id": "b", "url": "https://youtu.be/bbbbbbbbbbb", "name": "Active"}],
+            "youtube",
+            "prompt two",
+            config,
+            backup_dir=backup_dir,
+            job_dir=job_dir,
+        )
+
+        jobs = stale_jobs({"https://youtu.be/bbbbbbbbbbb"}, job_dir=job_dir)
+        assert [job["job_id"] for job in jobs] == [stale.stem]
+
+
+def test_archive_stale_jobs_moves_files_and_marks_them_stale():
+    with TemporaryDirectory() as temp_dir:
+        base = Path(temp_dir)
+        backup_dir = base / "backups"
+        job_dir = base / "jobs"
+        archive_dir = base / "jobs" / "stale"
+        config = get_runtime_config()
+        stale = create_extraction_job(
+            [{"page_id": "a", "url": "https://youtu.be/aaaaaaaaaaa", "name": "Stale"}],
+            "youtube",
+            "prompt one",
+            config,
+            backup_dir=backup_dir,
+            job_dir=job_dir,
+        )
+
+        jobs = stale_jobs(set(), job_dir=job_dir)
+        archived = archive_stale_jobs(jobs, job_dir=job_dir, archive_dir=archive_dir)
+
+        assert len(archived) == 1
+        assert archived[0]["status"] == "stale"
+        assert not stale.exists()
+        assert (archive_dir / stale.name).exists()

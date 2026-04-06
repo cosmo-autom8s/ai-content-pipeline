@@ -1,10 +1,12 @@
 # Autom8Lab Content Engine
 
-**Version:** 2.3.0
-**Last updated:** 2026-04-05
-**Phase:** 2 — Content Agent (Conversational Sparring Partner)
+**Version:** 2.4.0
+**Last updated:** 2026-04-06
+**Phase:** 2 — Content Agent + Dual-Agent Runtime
 
-Turn raw video links (sent via Telegram) into classified knowledge, actionable content ideas, and platform-ready captions — with a conversational Content Agent that knows your brand, your backlog, and your principles. The agent gets smarter over time through 9 Obsidian knowledge files that compound across sessions.
+Turn raw video links into classified knowledge, actionable content ideas, and platform-ready captions. This repo now supports three operating modes: fully automated Claude runs, cheaper OpenRouter-assisted hybrid runs, and Codex-native session runs that use MCP tools directly.
+
+This is the core idea: the business logic lives in the repo, not inside one agent. Claude and Codex are both operators over the same pipeline state in Notion, the same knowledge files in Obsidian, and the same Python orchestration layer.
 
 ---
 
@@ -20,12 +22,14 @@ Telegram Bot ──> Text file (backup) + Notion Links Queue*
   v
 Evening Pipeline (orchestrator.py)
   |
-  ├── TokScript MCP ────── extracts transcripts for ALL platforms (YouTube, TikTok, IG)
-  │                         via Claude CLI subprocess + TokScript MCP tools
+  ├── Extraction runtime ─ extracts transcripts for supported video links
+  │                         via Claude CLI + TokScript MCP
+  │                         or via Codex extraction jobs + TokScript MCP
   ├── Spotify Converter ── finds YouTube version of Spotify podcasts
   ├── TokScript CSV ────── fallback: parses CSV exports if MCP unavailable
   └── Classifier v2 ────── auto-tags with non-exclusive knowledge tags + writes to Obsidian
-  |                         via OpenRouter API (free Qwen model, zero Claude tokens)
+  |                         via OpenRouter API
+  |                         or in-session via Codex / Claude
   |                         (ai_knowledge, business_knowledge, content_lesson, hook_pattern,
   |                          tool_discovery, content_idea, workflow, knowledge_nugget, news)
   v
@@ -57,9 +61,29 @@ You post it
 
 ---
 
+## Runtime Modes
+
+You can run the same system in three ways:
+
+| Mode | Best for | What runs where | Cost profile | Caveats |
+|------|----------|-----------------|--------------|---------|
+| Claude Automated | Cron jobs, unattended nightly runs | Python orchestrator + Claude CLI subprocess + TokScript MCP | Spends Anthropic credits | Most automated today, but extraction uses Claude credits |
+| Hybrid | Cheaper unattended classification | Claude for extraction, OpenRouter for classifier | Cheaper than full Claude, can be near-free for classification | Free OpenRouter models can be slow, rate-limited, or timeout |
+| Codex Session-Native | Manual operator runs in ChatGPT Codex | Python for queueing + Codex MCP for extraction + optional in-session classification | Spends OpenAI credits instead of Anthropic | Not fully unattended yet; Codex extraction runs through queued jobs in-session |
+
+Recommended use:
+
+- Use `Claude Automated` when you want the nightly pipeline to run unattended.
+- Use `Hybrid` when you want to keep automation but reduce Anthropic spend.
+- Use `Codex Session-Native` when you want to operate the system locally in a Codex session and keep extraction/classification inside that session as much as possible.
+
+Reference guide: [2026-04-06-runtime-modes-and-operator-guide.md](/Users/cosmo/Documents/AIProjects/content-pipeline-bot/docs/superpowers/guides/2026-04-06-runtime-modes-and-operator-guide.md)
+
+---
+
 ## Content Agent
 
-The Content Agent is an upgrade from a capture-and-process tool into a conversational content sparring partner. Instead of just running scripts, you can open a Claude Code session and talk through ideas, get a morning brief, run classification interactively, or spar on hooks and angles — all grounded in your Notion backlog, brand principles, and 9 knowledge files. Every classified video automatically enriches the knowledge files, making future briefs, ideation, and sparring sessions more informed.
+The Content Agent is an upgrade from a capture-and-process tool into a conversational content sparring partner. Instead of just running scripts, you can open a Claude or Codex session and talk through ideas, get a morning brief, run classification interactively, or spar on hooks and angles — all grounded in your Notion backlog, brand principles, and 9 knowledge files. Every classified video automatically enriches the knowledge files, making future briefs, ideation, and sparring sessions more informed.
 
 ### `/ca-*` Commands
 
@@ -78,14 +102,14 @@ The Content Agent is an upgrade from a capture-and-process tool into a conversat
 
 | When | What | How |
 |------|------|-----|
-| Morning | Get a content brief | `/ca-brief` in Claude Code — pipeline status, top 3 ideas to film, one principle, one tool |
+| Morning | Get a content brief | `/ca-brief` in Claude Code, or ask Codex to summarize pipeline state |
 | During the day | Save links | Send to Telegram bot |
-| During the day | Freeform ideation or hook refinement | `/ca-sparring` or `/ca-research` in Claude Code |
-| Evening | Run pipeline | `python orchestrator.py` — extracts transcripts (all platforms via MCP) + classifies + writes to Obsidian |
+| During the day | Freeform ideation or hook refinement | `/ca-sparring` or `/ca-research` in Claude Code, or equivalent Codex session prompts |
+| Evening | Run pipeline | `python orchestrator.py` for unattended or hybrid runs, or queue/extract in Codex session |
 | Evening | Triage links | In Notion, set each classified link to `generate_ideas`, `learning`, `inspiration`, `postponed`, or `other` |
-| Evening | Generate ideas | `python engines/ideation.py` or `/ca-ideate` |
+| Evening | Generate ideas | `python engines/ideation.py`, `/ca-ideate`, or a Codex-led save flow using the same script |
 | Evening | Review ideas | Dashboard at `localhost:8088` — filter, sort, score, review |
-| After filming | Generate captions | `/ca-captions` in Claude Code |
+| After filming | Generate captions | `/ca-captions` in Claude Code or `python engines/captions.py --save ...` from either agent |
 | After filming | Post content | Copy captions from Notion, post manually |
 
 ---
@@ -188,6 +212,8 @@ cp .env.example .env
 #   OPENROUTER_API_KEY   (for classifier — uses free Qwen model)
 #   CLASSIFIER_MODEL     (default: qwen/qwen3.6-plus:free)
 #   CLASSIFIER_DELAY     (seconds between API calls, default: 5)
+#   AGENT_RUNTIME        (claude or codex)
+#   EXTRACTOR_BACKEND    (claude_cli or agent_prompt)
 ```
 
 ### 3. Validate the environment
@@ -199,27 +225,60 @@ python validate_env.py --skip-network
 
 `validate_env.py` checks `.env`, the Obsidian vault path, Notion API access, and OpenRouter auth. TokScript/Notion MCP access must be validated from the active agent session.
 
+Recommended smoke test before a real run:
+
+```bash
+python validate_env.py
+python orchestrator.py --status
+python orchestrator.py --dry-run
+python engines/classifier.py --dry-run
+```
+
 ### 4. Run the Telegram bot
 
 ```bash
 python bot/main.py
 ```
 
-### 5. Run the evening pipeline
+### 5. Choose a runtime mode
+
+Claude automated:
 
 ```bash
-python orchestrator.py           # Full pipeline: CSV inbox + YouTube extraction + classification
+export AGENT_RUNTIME=claude
+export EXTRACTOR_BACKEND=claude_cli
+```
+
+Hybrid:
+
+```bash
+export AGENT_RUNTIME=claude
+export EXTRACTOR_BACKEND=claude_cli
+# classifier still uses OpenRouter via OPENROUTER_API_KEY
+```
+
+Codex session-native:
+
+```bash
+export AGENT_RUNTIME=codex
+export EXTRACTOR_BACKEND=agent_prompt
+```
+
+### 6. Run the evening pipeline
+
+```bash
+python orchestrator.py           # Full pipeline: CSV inbox + Spotify conversion + extraction + classification
 python orchestrator.py --dry-run # Preview what would be processed
 python orchestrator.py --status  # Show current queue counts
 ```
 
-### 6. Run the dashboard
+### 7. Run the dashboard
 
 ```bash
 ./run.sh                         # Builds frontend + starts API on port 8088
 ```
 
-### 7. Run extractors individually (optional)
+### 8. Run extractors individually (optional)
 
 ```bash
 python extractors/youtube.py                # Extract all pending YouTube links via TokScript MCP
@@ -246,7 +305,7 @@ Recommended defaults:
 - Claude session: `AGENT_RUNTIME=claude`, leave `EXTRACTOR_BACKEND` empty or set it to `claude_cli`
 - Codex session: `AGENT_RUNTIME=codex`, set `EXTRACTOR_BACKEND=agent_prompt`
 
-`agent_prompt` writes a runtime-specific extraction prompt into `csv_inbox/mcp_extracts/` for an agent session to execute manually. This is the current Codex-compatible bridge until extraction is fully decoupled from subprocess-based agent execution.
+`agent_prompt` writes a runtime-specific extraction prompt and queued job into `csv_inbox/mcp_extracts/` and `csv_inbox/extraction_jobs/` for a Codex session to execute manually. This is the current Codex-compatible bridge until extraction is fully decoupled from subprocess-based agent execution.
 
 Queued prompt jobs can be inspected with:
 
@@ -256,6 +315,8 @@ python extractors/extraction_jobs.py --next
 python extractors/extraction_jobs.py --id JOB_ID
 python extractors/extraction_jobs.py --claim JOB_ID --worker codex
 python extractors/extraction_jobs.py --release JOB_ID
+python extractors/extraction_jobs.py --stale
+python extractors/extraction_jobs.py --prune-stale
 python extractors/extraction_jobs.py --complete JOB_ID --output-file /path/to/agent_output.txt
 python extractors/extraction_jobs.py --fail JOB_ID --error "reason"
 ```
@@ -267,7 +328,12 @@ Recommended Codex-native flow:
 4. Run the job via Codex MCP tools
 5. `python extractors/extraction_jobs.py --complete JOB_ID --output-file /path/to/agent_output.txt`
 
-### 8. Run the classifier (optional, runs automatically in orchestrator)
+Stale-job cleanup:
+
+- `python extractors/extraction_jobs.py --stale` reports queued jobs whose URLs are no longer present in the live pending Notion queue
+- `python extractors/extraction_jobs.py --prune-stale` archives those jobs into `csv_inbox/extraction_jobs/stale/`
+
+### 9. Run the classifier (optional, runs automatically in orchestrator)
 
 ```bash
 python engines/classifier.py                # Classify all transcribed links (via OpenRouter)
@@ -278,7 +344,16 @@ python engines/classifier.py --id PAGE_ID   # Classify a specific link
 python engines/classifier.py --dry-run      # Preview what would be classified
 ```
 
-### 9. Run ideation pipeline (via Claude Code)
+For manual Codex or Claude sessions, you can also classify in-session instead of using OpenRouter:
+
+1. fetch a `transcribed` link from Notion
+2. classify it in-session using the same 9-tag schema
+3. update the page to `classified`
+4. append extracted knowledge into the matching Obsidian files
+
+That path is useful when free OpenRouter models are slow or rate-limited, but it is not the unattended path.
+
+### 10. Run ideation pipeline (via Claude Code or shared save flow)
 
 ```bash
 python engines/ideation.py                  # Pipeline mode (default): 4-skill ideation
@@ -290,7 +365,7 @@ python engines/ideation.py --save '{"page_id":"...","url":"..."}' '[...]'  # Sav
 
 `--save` now validates idea payloads, skips obvious duplicates for the same source, and only marks the source link `processed` if at least one new idea is actually created.
 
-### 10. Run captions (via Claude Code)
+### 11. Run captions (via Claude Code or shared save flow)
 
 ```bash
 python engines/captions.py --list           # List filmed ideas ready for captions
@@ -330,6 +405,17 @@ Caption saves support partial updates. Status stays unchanged unless you explici
 | X Posts | `twitter.com`, `x.com` | x_post | Yes | — |
 | LinkedIn | `linkedin.com/posts`, `linkedin.com/feed/update` | linkedin | Yes | — |
 | Reddit | `reddit.com` | reddit | Yes | — |
+
+### What The Orchestrator Does Not Process Yet
+
+These categories are intentionally stored but not auto-transcribed by the current orchestrator:
+
+- `carousel`
+- `linkedin`
+- `reddit`
+- `x_post`
+
+Those links remain `pending` until you either build a dedicated processor for them or manually triage them into another status. This is expected behavior, not a stuck queue bug.
 
 ---
 
@@ -380,7 +466,9 @@ content-pipeline-bot/
 │   └── main.py                       # Bot handlers, Notion sync, /note support
 │
 ├── extractors/                       # Transcript extraction tools
-│   ├── youtube.py                    # YouTube transcripts via TokScript MCP (Claude CLI subprocess)
+│   ├── youtube.py                    # YouTube transcripts via shared runtime backend
+│   ├── runtime.py                    # Claude/Codex extraction runtime selection + job creation
+│   ├── extraction_jobs.py            # Codex-native extraction job queue, completion, stale cleanup
 │   ├── tokscript_parser.py           # TokScript CSV parser — fallback for TikTok/IG transcripts
 │   ├── mcp_normalizer.py             # Normalizes TokScript MCP responses + platform detection
 │   └── spotify_to_youtube.py         # Spotify podcast > YouTube URL converter
@@ -424,16 +512,22 @@ content-pipeline-bot/
 ├── knowledge/                        # Local fallback for Obsidian knowledge files
 │
 ├── tests/                            # Test suite
-│   └── test_classifier.py            # 27 tests: parsing, formatting, dedup, all tag types
+│   ├── test_classifier.py            # Classifier tests: parsing, formatting, fallback, dedup
+│   ├── test_runtime.py               # Runtime tests: Claude/Codex routing, extraction jobs, stale cleanup
+│   ├── test_ideation.py              # Idea save validation and duplicate handling
+│   ├── test_captions.py              # Caption save validation and status handling
+│   └── test_mcp_normalizer.py        # EXTRACT_RESULT parsing and backup behavior
 │
 ├── orchestrator.py                   # Evening pipeline (MCP extraction + CSV fallback + classification)
 ├── run.sh                            # Single-command startup (builds frontend + starts API)
 ├── csv_inbox/                        # Drop TokScript CSVs here (fallback if MCP unavailable)
 │   ├── processed/                    # Processed CSVs moved here automatically
-│   └── mcp_extracts/                 # Backup JSONs from MCP extraction runs
+│   ├── mcp_extracts/                 # Backup JSONs + raw outputs from MCP extraction runs
+│   └── extraction_jobs/              # Queued Codex extraction jobs (plus stale archive)
 ├── links/                            # Text file backups (legacy, still written to)
 ├── migrate_links.py                  # One-time migration script (already run)
-└── upload_to_notion.py               # TokScript CSV bulk uploader — uploads CSV exports to Notion Links Queue
+├── upload_to_notion.py               # TokScript CSV bulk uploader — uploads CSV exports to Notion Links Queue
+└── validate_env.py                   # Environment + connectivity validation
 ```
 
 ---
@@ -444,14 +538,26 @@ content-pipeline-bot/
 - **React + Vite** dashboard for idea review
 - **FastAPI** backend serving the dashboard API (port 8088)
 - **Notion API** (REST) for database reads/writes from bot + scripts
-- **Notion MCP** for database creation, views, bulk operations via Claude Code
+- **Notion MCP** for interactive bulk operations from Claude or Codex sessions
 - **Obsidian** for knowledge file storage (synced via iCloud)
 - **TokScript MCP** for transcript extraction across all platforms (YouTube, TikTok, Instagram)
-- **OpenRouter API** for classification (free Qwen model — zero Claude token cost, 30s retry backoff on rate limits)
-- **Claude CLI** (`claude -p --model sonnet`) for MCP extraction subprocess and ideation
+- **OpenRouter API** for unattended classification (cheap/free model option, 30s retry backoff on rate limits)
+- **Claude CLI** (`claude -p --model sonnet`) for fully automated MCP extraction subprocesses
+- **Codex MCP session** for manual/session-native extraction and classification
 - **yt-dlp** for YouTube search (Spotify converter)
 - **Spotify oEmbed API** for podcast episode metadata (no auth needed)
 - **Claude Code** for interactive ideation (4-skill pipeline), caption generation, and Content Agent skills
+- **ChatGPT Codex** for local repo operation, MCP execution, and in-session classification
+
+---
+
+## Operational Caveats
+
+- `Claude Automated` is the most unattended mode today, but extraction spend comes from Anthropic credits because Claude CLI owns the MCP subprocess path.
+- `Hybrid` reduces Anthropic usage because classification moves to OpenRouter, but cheap or free models can be slow and occasionally rate-limit or timeout.
+- `Codex Session-Native` avoids Claude usage for the operator session, but extraction is currently session-driven through queued jobs rather than fully unattended subprocess automation.
+- The orchestrator intentionally leaves unsupported categories in `pending`. If you see a large pending queue made of `linkedin`, `carousel`, `reddit`, or `x_post`, that is expected.
+- Old queued extraction jobs can become stale after the live Notion queue changes. Use `python extractors/extraction_jobs.py --stale` and `--prune-stale`.
 
 ---
 
@@ -459,6 +565,7 @@ content-pipeline-bot/
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 2.4.0 | 2026-04-06 | Dual-agent runtime hardening: shared Claude/Codex extraction runtime, Codex extraction job queue with claim/release/complete/fail flow, stale-job cleanup, environment validation, ideation/caption save validation, Spotify orchestration wiring, classifier fallback handling, and updated docs for Claude automated, hybrid, and Codex session-native operation. |
 | 2.3.0 | 2026-04-05 | OpenRouter integration: classifier now uses OpenRouter API with free Qwen model (`qwen/qwen3.6-plus:free`) instead of Claude CLI subprocess — zero Claude token cost for classification. 30s retry backoff on 429 rate limits. New `--limit=N` flag for batch-size control. `--retry-errors` flag for re-running failed links. Configurable delay between API calls (`CLASSIFIER_DELAY`). `upload_to_notion.py` CSV uploader for TokScript bulk exports. |
 | 2.2.0 | 2026-04-05 | TokScript MCP integration: all transcript extraction (YouTube, TikTok, Instagram) now runs via TokScript MCP tools through Claude CLI subprocess — no more manual CSV exports or youtube-transcript-api IP blocks. Full transcripts saved to Notion (multi-block rich_text, up to 100K chars). New `/ca-extract` skill for interactive MCP extraction. `mcp_normalizer.py` for response normalization. Legacy youtube-transcript-api + yt-dlp code preserved as commented reference. |
 | 2.1.0 | 2026-03-31 | Classifier v2: 4 new knowledge tag types (ai_knowledge, business_knowledge, knowledge_nugget, news), non-exclusive tagging with per-file framing, Obsidian #tags on every entry, heading-based deduplication, news date stamps. 9 Obsidian knowledge files. Notion Content Tags updated. 27 tests. |

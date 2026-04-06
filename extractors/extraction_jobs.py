@@ -1,18 +1,39 @@
 #!/usr/bin/env python3
-"""Utilities for listing, inspecting, and completing queued extraction jobs."""
+"""Utilities for listing, inspecting, completing, and pruning queued extraction jobs."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
+
+import requests
+from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from extractors.mcp_normalizer import parse_extract_result_output, save_backup, save_raw_output
 from extractors.runtime import DEFAULT_BACKUP_DIR, DEFAULT_JOB_DIR
+
+PROJECT_ROOT = Path(__file__).parent.parent
+ENV_PATH = PROJECT_ROOT / ".env"
+STALE_JOB_DIR = DEFAULT_JOB_DIR / "stale"
+
+if ENV_PATH.exists():
+    load_dotenv(ENV_PATH, override=True)
+
+
+def notion_headers() -> dict[str, str]:
+    """Return Notion API headers from the local environment."""
+    api_key = os.getenv("NOTION_API_KEY", "").strip()
+    return {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "Notion-Version": "2022-06-28",
+    }
 
 
 def load_job(job_path: Path) -> dict:
@@ -50,9 +71,99 @@ def next_pending_job(job_dir: Path | None = None) -> dict | None:
     return pending_jobs[0] if pending_jobs else None
 
 
+def fetch_pending_link_urls() -> set[str]:
+    """Return the current set of pending link URLs from the live Notion queue."""
+    db_id = os.getenv("NOTION_LINKS_DB_ID", "").strip()
+    if not db_id:
+        raise EnvironmentError("NOTION_LINKS_DB_ID is not set.")
+
+    urls: set[str] = set()
+    has_more = True
+    start_cursor: str | None = None
+    while has_more:
+        body: dict = {
+            "page_size": 100,
+            "filter": {
+                "property": "Status",
+                "select": {"equals": "pending"},
+            },
+        }
+        if start_cursor:
+            body["start_cursor"] = start_cursor
+
+        response = requests.post(
+            f"https://api.notion.com/v1/databases/{db_id}/query",
+            headers=notion_headers(),
+            json=body,
+            timeout=20,
+        )
+        response.raise_for_status()
+        payload = response.json()
+
+        for page in payload.get("results", []):
+            properties = page.get("properties", {})
+            url = properties.get("Link URL", {}).get("url", "").strip()
+            if url:
+                urls.add(url)
+
+        has_more = payload.get("has_more", False)
+        start_cursor = payload.get("next_cursor")
+
+    return urls
+
+
+def stale_jobs(
+    pending_urls: set[str],
+    job_dir: Path | None = None,
+) -> list[dict]:
+    """Return jobs that are no longer represented in the live pending queue."""
+    stale: list[dict] = []
+    for job in list_jobs(job_dir):
+        if job.get("status", "pending") not in {"pending", "in_progress"}:
+            continue
+
+        job_urls = {link.get("url", "").strip() for link in job.get("links", []) if link.get("url", "").strip()}
+        if job_urls and job_urls.isdisjoint(pending_urls):
+            stale.append(job)
+    return stale
+
+
 def save_job(job_path: Path, job: dict) -> None:
     """Persist a job payload."""
     job_path.write_text(json.dumps(job, indent=2), encoding="utf-8")
+
+
+def archive_stale_jobs(
+    jobs: list[dict],
+    *,
+    job_dir: Path | None = None,
+    archive_dir: Path | None = None,
+) -> list[dict]:
+    """Move stale jobs into an archive directory and mark them stale."""
+    target_job_dir = job_dir or DEFAULT_JOB_DIR
+    target_archive_dir = archive_dir or STALE_JOB_DIR
+    target_archive_dir.mkdir(parents=True, exist_ok=True)
+
+    archived: list[dict] = []
+    for job in jobs:
+        job_id = job["job_id"]
+        src = find_job_path(job_id, target_job_dir)
+        if not src:
+            continue
+
+        payload = load_job(src)
+        payload["previous_status"] = payload.get("status", "pending")
+        payload["status"] = "stale"
+        payload["stale_at"] = datetime.now().isoformat(timespec="seconds")
+        payload["stale_reason"] = "All linked URLs are absent from the live pending Notion queue."
+
+        dst = target_archive_dir / src.name
+        dst.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        src.unlink()
+        payload["job_path"] = str(dst)
+        archived.append(payload)
+
+    return archived
 
 
 def claim_job(job_id: str, worker: str, *, job_dir: Path | None = None) -> dict:
@@ -159,6 +270,8 @@ def main() -> None:
     parser.add_argument("--claim", dest="claim_job_id", help="Claim a job for a worker")
     parser.add_argument("--worker", dest="worker_name", help="Worker name for --claim")
     parser.add_argument("--release", dest="release_job_id", help="Release an in-progress job back to pending")
+    parser.add_argument("--stale", action="store_true", help="List jobs that are stale relative to the live pending Notion queue")
+    parser.add_argument("--prune-stale", action="store_true", help="Archive stale jobs into extraction_jobs/stale/")
     parser.add_argument("--complete", dest="complete_job_id", help="Mark a job completed from agent output")
     parser.add_argument("--output-file", dest="output_file", help="Path to raw agent output text for --complete")
     parser.add_argument("--fail", dest="fail_job_id", help="Mark a job failed")
@@ -184,6 +297,22 @@ def main() -> None:
     if args.release_job_id:
         job = release_job(args.release_job_id)
         print(json.dumps(job, indent=2))
+        return
+
+    if args.stale or args.prune_stale:
+        pending_urls = fetch_pending_link_urls()
+        jobs = stale_jobs(pending_urls)
+        if args.prune_stale:
+            archived = archive_stale_jobs(jobs)
+            print(json.dumps({
+                "archived": len(archived),
+                "jobs": archived,
+            }, indent=2))
+            return
+        print(json.dumps({
+            "stale": len(jobs),
+            "jobs": jobs,
+        }, indent=2))
         return
 
     if args.complete_job_id:
