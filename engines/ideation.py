@@ -45,6 +45,14 @@ PIPELINE_PROMPT = (Path(__file__).parent.parent / "prompts" / "ideation_pipeline
 CREATOR_CONTEXT = (Path(__file__).parent.parent / "prompts" / "creator_context.md").read_text()
 
 
+def _parse_json_arg(raw: str, label: str) -> dict | list:
+    """Parse a JSON CLI argument with a clearer error message."""
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid {label} JSON: {exc}") from exc
+
+
 def get_text_prop(props: dict, key: str) -> str:
     """Extract plain text from a Notion rich_text or title property."""
     prop = props.get(key, {})
@@ -307,6 +315,33 @@ def format_pipeline_source(link: dict) -> str:
 def main():
     args = sys.argv[1:]
     use_legacy = "--legacy" in args
+
+    if "--save" in args:
+        idx = args.index("--save")
+        if idx + 2 >= len(args):
+            print("Usage: python engines/ideation.py --save '{\"page_id\":\"...\",\"url\":\"...\"}' '[...]'")
+            return
+
+        try:
+            source = _parse_json_arg(args[idx + 1], "source")
+            ideas = _parse_json_arg(args[idx + 2], "ideas")
+        except ValueError as exc:
+            print(exc)
+            return
+
+        if not isinstance(source, dict):
+            print("Source JSON must be an object with at least page_id.")
+            return
+        page_id = source.get("page_id", "")
+        source_url = source.get("url", "")
+        if not page_id:
+            print("Source JSON is missing page_id.")
+            return
+
+        ideas_json = json.dumps(ideas)
+        saved = save_ideas(ideas_json, page_id, source_url)
+        print(f"\n✅ Done: {saved} idea(s) saved")
+        return
 
     if "--list" in args:
         print("Querying links marked 'generate_ideas'...")

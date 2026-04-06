@@ -46,7 +46,7 @@ Display each idea in a readable format with its score, hooks, and the top pick f
 ### 6. Save Approved Ideas
 
 For each approved idea, save it using one of:
-- `python engines/ideation.py --save` (passing the JSON)
+- `python engines/ideation.py --save '{"page_id":"<SOURCE_PAGE_ID>","url":"<SOURCE_URL>"}' '[...]'`
 - Notion MCP — create a new page in the Ideas database with all fields from the pipeline output format
 
 Confirm how many ideas were saved and offer to queue them for filming.

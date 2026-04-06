@@ -171,6 +171,7 @@ Start with: `./run.sh` (builds frontend + starts FastAPI server)
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+pip install -r api/requirements.txt
 ```
 
 ### 2. Configure credentials
@@ -241,6 +242,7 @@ python engines/ideation.py                  # Pipeline mode (default): 4-skill i
 python engines/ideation.py --list           # List links tagged 'generate_ideas'
 python engines/ideation.py --id PAGE_ID     # Process a specific link
 python engines/ideation.py --legacy         # Legacy single-shot prompt mode
+python engines/ideation.py --save '{"page_id":"...","url":"..."}' '[...]'  # Save approved ideas
 ```
 
 ### 9. Run captions (via Claude Code)
@@ -248,6 +250,7 @@ python engines/ideation.py --legacy         # Legacy single-shot prompt mode
 ```bash
 python engines/captions.py --list           # List filmed ideas ready for captions
 python engines/captions.py --id PAGE_ID     # Generate captions for a specific idea
+python engines/captions.py --save PAGE_ID '{"caption_tiktok":"...","caption_instagram":"...","caption_youtube":"...","caption_linkedin":"..."}'
 ```
 
 ---

@@ -53,10 +53,14 @@ Make requested revisions before saving.
 
 ### 7. Save Approved Captions
 
-For each approved set, update the idea's Notion page via Notion MCP with the platform captions. Update fields:
+For each approved set, update the idea's Notion page via Notion MCP or:
+
+- `python engines/captions.py --save <PAGE_ID> '{"caption_tiktok":"...","caption_instagram":"...","caption_youtube":"...","caption_linkedin":"..."}'`
+
+Update fields:
 - `caption_tiktok`
 - `caption_instagram`
-- `caption_youtube_title` and `caption_youtube_description`
+- `caption_youtube`
 - `caption_linkedin`
 
-Confirm how many ideas were updated and offer to mark them as `ready_to_post` if they're fully done.
+Confirm how many ideas were updated and offer to mark them as `captioned` if they're fully done.

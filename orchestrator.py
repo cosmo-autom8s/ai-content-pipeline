@@ -36,6 +36,7 @@ from extractors.youtube import (
     process_links_via_mcp,
     query_pending_youtube_links,
 )
+from extractors.spotify_to_youtube import query_pending_spotify_links, process_spotify_link
 from extractors.tokscript_parser import CSV_INBOX
 from engines.classifier import classify_all_transcribed
 
@@ -159,9 +160,19 @@ def show_status():
     print("=" * 50)
 
     print("\nLinks Queue:")
-    for status in ["pending", "transcribed", "processed", "archived"]:
+    for status in [
+        "pending",
+        "transcribed",
+        "classified",
+        "classification_error",
+        "generate_ideas",
+        "processed",
+        "converted",
+        "archived",
+    ]:
         count = count_by_status(NOTION_LINKS_DB_ID, status)
-        print(f"  {status}: {count}")
+        if count != 0:
+            print(f"  {status}: {count}")
 
     print("\nContent Ideas:")
     for status in ["new", "queued", "filming_today", "filmed", "captioned", "posted", "archived"]:
@@ -363,7 +374,26 @@ def main():
                 print(f"  Would process: {f.name}")
         print()
 
-    # Step 2: Query pending links
+    # Step 2: Convert pending Spotify podcast links
+    spotify_links = query_pending_spotify_links()
+    if spotify_links:
+        print(f"Found {len(spotify_links)} pending Spotify podcast link(s)")
+        if dry_run:
+            for link in spotify_links[:10]:
+                print(f"  Would convert: {link['name'][:50]} — {link['url'][:60]}")
+            if len(spotify_links) > 10:
+                print(f"  ... and {len(spotify_links) - 10} more")
+        else:
+            converted = 0
+            for i, link in enumerate(spotify_links, 1):
+                print(f"  [{i}/{len(spotify_links)}] Converting Spotify link...")
+                if process_spotify_link(link["page_id"], link["url"], link["name"], link["notes"]):
+                    converted += 1
+                print()
+            print(f"Spotify conversion: {converted}/{len(spotify_links)} successful")
+        print()
+
+    # Step 3: Query pending links
     print("Querying pending links...")
     pending = query_all_pending()
 
@@ -395,7 +425,7 @@ def main():
         print(f"  Skipped (no extractor): {len(skipped_links)}")
         print()
 
-        # Step 3: Process YouTube links via TokScript MCP
+        # Step 4: Process YouTube links via TokScript MCP
         if youtube_links:
             print(f"Processing {len(youtube_links)} YouTube link(s) via MCP...")
             yt_success = process_links_via_mcp(youtube_links, dry_run)
@@ -403,7 +433,7 @@ def main():
                 print(f"YouTube extraction: {yt_success}/{len(youtube_links)} successful")
             print()
 
-        # Step 4: Extract short-form links via Claude CLI + TokScript MCP
+        # Step 5: Extract short-form links via Claude CLI + TokScript MCP
         if manual_links:
             print(f"Processing {len(manual_links)} short-form link(s) via MCP...")
             mcp_success = extract_shortform_via_mcp(manual_links, dry_run)
@@ -419,7 +449,7 @@ def main():
                 print(f"  ... and {len(skipped_links) - 5} more")
             print()
 
-    # Step 5: Classify newly transcribed links
+    # Step 6: Classify newly transcribed links
     print("=" * 50)
     print("Classifying transcribed links...")
     if not dry_run:
@@ -430,7 +460,7 @@ def main():
         print(f"\nClassification: {classified_count} links would be classified")
     print()
 
-    # Step 6: Summary
+    # Step 7: Summary
     print("=" * 50)
     print("Next steps:")
     print("  1. Review classified links in Notion 'Classified' view")

@@ -39,6 +39,17 @@ NOTION_HEADERS = {
 PROMPT_TEMPLATE = (Path(__file__).parent.parent / "prompts" / "captions.txt").read_text()
 
 
+def _parse_json_arg(raw: str) -> dict:
+    """Parse JSON passed on the CLI."""
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid captions JSON: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ValueError("Captions JSON must be an object.")
+    return data
+
+
 def get_text_prop(props: dict, key: str) -> str:
     """Extract plain text from a Notion rich_text or title property."""
     prop = props.get(key, {})
@@ -88,11 +99,18 @@ def query_filmed_ideas() -> list[dict]:
         data = resp.json()
         for page in data.get("results", []):
             props = page["properties"]
+            hooks = [
+                get_text_prop(props, "Hook 1"),
+                get_text_prop(props, "Hook 2"),
+                get_text_prop(props, "Hook 3"),
+                get_text_prop(props, "Hook 4"),
+                get_text_prop(props, "Hook 5"),
+            ]
             results.append({
                 "page_id": page["id"],
                 "name": get_text_prop(props, "Name"),
-                "description": get_text_prop(props, "Main Topic"),
-                "hook": get_text_prop(props, "Suggested Hook"),
+                "description": get_text_prop(props, "Description"),
+                "hook": next((hook for hook in hooks if hook), ""),
                 "format": get_select_prop(props, "Format"),
                 "angle": get_select_prop(props, "Angle"),
             })
@@ -116,11 +134,18 @@ def get_idea_by_id(page_id: str) -> dict | None:
 
     page = resp.json()
     props = page["properties"]
+    hooks = [
+        get_text_prop(props, "Hook 1"),
+        get_text_prop(props, "Hook 2"),
+        get_text_prop(props, "Hook 3"),
+        get_text_prop(props, "Hook 4"),
+        get_text_prop(props, "Hook 5"),
+    ]
     return {
         "page_id": page["id"],
         "name": get_text_prop(props, "Name"),
-        "description": get_text_prop(props, "Main Topic"),
-        "hook": get_text_prop(props, "Suggested Hook"),
+        "description": get_text_prop(props, "Description"),
+        "hook": next((hook for hook in hooks if hook), ""),
         "format": get_select_prop(props, "Format"),
         "angle": get_select_prop(props, "Angle"),
     }
@@ -178,6 +203,20 @@ def save_captions(page_id: str, captions_json: str) -> bool:
 
 def main():
     args = sys.argv[1:]
+
+    if "--save" in args:
+        idx = args.index("--save")
+        if idx + 2 >= len(args):
+            print("Usage: python engines/captions.py --save PAGE_ID '{\"caption_tiktok\":\"...\"}'")
+            return
+        page_id = args[idx + 1]
+        try:
+            captions = _parse_json_arg(args[idx + 2])
+        except ValueError as exc:
+            print(exc)
+            return
+        save_captions(page_id, json.dumps(captions))
+        return
 
     if "--list" in args:
         print("Querying filmed ideas...")
