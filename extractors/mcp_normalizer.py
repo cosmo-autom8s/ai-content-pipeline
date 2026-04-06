@@ -87,3 +87,75 @@ def save_backup(results: list[dict], batch_dir: Path | None = None) -> Path:
         json.dump(results, f, indent=2, ensure_ascii=False)
 
     return filepath
+
+
+def save_raw_output(output: str, prefix: str, batch_dir: Path | None = None) -> Path:
+    """Save raw command output for an MCP batch."""
+    target_dir = batch_dir or BACKUP_DIR
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    filepath = target_dir / f"{prefix}_{timestamp}.txt"
+    filepath.write_text(output, encoding="utf-8")
+    return filepath
+
+
+def parse_extract_result_output(output: str, links: list[dict]) -> dict:
+    """Parse the structured EXTRACT_RESULT line from an MCP worker response.
+
+    Returns a normalized summary dict:
+    {
+      "extracted": int,
+      "failed": int,
+      "details": [{url, status, title, error}],
+      "parsed": bool,
+    }
+    """
+    default_details = [
+        {
+            "url": link.get("url", ""),
+            "status": "unknown",
+            "title": link.get("name", ""),
+            "error": "missing EXTRACT_RESULT summary",
+        }
+        for link in links
+    ]
+
+    for line in reversed(output.splitlines()):
+        if not line.startswith("EXTRACT_RESULT::"):
+            continue
+        try:
+            summary = json.loads(line.removeprefix("EXTRACT_RESULT::"))
+        except json.JSONDecodeError:
+            break
+
+        raw_details = summary.get("details", [])
+        normalized_details = []
+        for detail in raw_details:
+            normalized_details.append({
+                "url": detail.get("url", ""),
+                "status": detail.get("status", "unknown"),
+                "title": detail.get("title", detail.get("url", "")),
+                "error": detail.get("error", ""),
+            })
+
+        extracted = summary.get("extracted")
+        if not isinstance(extracted, int):
+            extracted = sum(1 for item in normalized_details if item["status"] == "ok")
+        failed = summary.get("failed")
+        if not isinstance(failed, int):
+            failed = sum(1 for item in normalized_details if item["status"] != "ok")
+
+        return {
+            "extracted": extracted,
+            "failed": failed,
+            "details": normalized_details,
+            "parsed": True,
+        }
+
+    return {
+        "extracted": 0,
+        "failed": len(default_details),
+        "details": default_details,
+        "parsed": False,
+    }

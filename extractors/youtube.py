@@ -17,17 +17,17 @@ Usage:
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import shutil
 import subprocess
 import sys
-from datetime import datetime
 from pathlib import Path
 
 import requests
 from dotenv import load_dotenv
+
+from extractors.mcp_normalizer import parse_extract_result_output, save_backup, save_raw_output
 
 # Load .env from project root
 env_path = Path(__file__).parent.parent / ".env"
@@ -148,44 +148,34 @@ def process_links_via_mcp(links: list[dict], dry_run: bool = False) -> int:
 
     output = result.stdout
 
-    # Save full output as backup
-    MCP_BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-    backup_path = MCP_BACKUP_DIR / f"yt_extract_{timestamp}.txt"
-    backup_path.write_text(output, encoding="utf-8")
+    raw_backup_path = save_raw_output(output, "yt_extract", MCP_BACKUP_DIR)
+    summary = parse_extract_result_output(output, links)
+    json_backup_path = save_backup(
+        [{
+            "kind": "youtube_extract",
+            "links": links,
+            "summary": summary,
+            "raw_output_path": str(raw_backup_path),
+        }],
+        MCP_BACKUP_DIR,
+    )
 
-    # Parse the result summary
-    extracted = 0
-    for line in reversed(output.splitlines()):
-        if line.startswith("EXTRACT_RESULT::"):
-            try:
-                summary = json.loads(line.removeprefix("EXTRACT_RESULT::"))
-                extracted = summary.get("extracted", 0)
-                failed = summary.get("failed", 0)
-                details = summary.get("details", [])
+    for detail in summary["details"]:
+        status_icon = "ok" if detail["status"] == "ok" else "FAIL"
+        title = detail.get("title", detail.get("url", ""))[:50]
+        msg = f"    [{status_icon}] {title}"
+        if detail.get("error"):
+            msg += f" — {detail['error']}"
+        print(msg)
 
-                for d in details:
-                    status_icon = "ok" if d["status"] == "ok" else "FAIL"
-                    title = d.get("title", d.get("url", ""))[:50]
-                    msg = f"    [{status_icon}] {title}"
-                    if d.get("error"):
-                        msg += f" — {d['error']}"
-                    print(msg)
+    if not summary["parsed"]:
+        print("  Could not parse extraction result summary — marked batch as failed in structured backup")
+    elif summary["failed"]:
+        print(f"\n  {summary['failed']} link(s) failed — check backup: {json_backup_path}")
 
-                if failed:
-                    print(f"\n  {failed} link(s) failed — check backup: {backup_path}")
-            except json.JSONDecodeError:
-                print("  Could not parse extraction result summary")
-            break
-    else:
-        extracted = output.count("transcribed")
-        if extracted:
-            print(f"  Extraction completed (estimated {extracted} updates)")
-        else:
-            print("  Extraction completed but could not verify results")
-
-    print(f"  Backup saved: {backup_path}")
-    return extracted
+    print(f"  Raw backup saved: {raw_backup_path}")
+    print(f"  Structured backup saved: {json_backup_path}")
+    return summary["extracted"]
 
 
 # ---------------------------------------------------------------------------
