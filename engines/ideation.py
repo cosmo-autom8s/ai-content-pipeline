@@ -22,6 +22,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 import requests
 from dotenv import load_dotenv
@@ -43,6 +44,13 @@ NOTION_HEADERS = {
 PROMPT_TEMPLATE = (Path(__file__).parent.parent / "prompts" / "ideation.txt").read_text()
 PIPELINE_PROMPT = (Path(__file__).parent.parent / "prompts" / "ideation_pipeline.md").read_text()
 CREATOR_CONTEXT = (Path(__file__).parent.parent / "prompts" / "creator_context.md").read_text()
+
+VALID_ANGLES = {"copy_it", "remix_it", "react_to_it", "tool_review", "freebie_inspiration"}
+VALID_FORMATS = {"talking_head", "split_screen", "carousel"}
+VALID_URGENCIES = {"newsworthy", "evergreen"}
+VALID_FRAMES = {"pain", "prize", "news"}
+VALID_SETUPS = {"talking_head", "screen_recording", "walk_and_talk", "studio", "split_screen_react"}
+VALID_PRIORITIES = {"film_now", "film_soon", "batch_next", "shelved"}
 
 
 def _parse_json_arg(raw: str, label: str) -> dict | list:
@@ -70,6 +78,165 @@ def get_select_prop(props: dict, key: str) -> str:
     prop = props.get(key, {})
     sel = prop.get("select")
     return sel["name"] if sel else ""
+
+
+def _normalize_text(value: Any, limit: int = 2000) -> str:
+    """Convert supported values to stripped text capped to the Notion field limit."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()[:limit]
+    return str(value).strip()[:limit]
+
+
+def _normalize_list(value: Any) -> list[str]:
+    """Accept list or comma/newline separated text and return normalized string items."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        raw_items = value.replace("\n", ",").split(",")
+    elif isinstance(value, list):
+        raw_items = value
+    else:
+        raw_items = [value]
+
+    items = []
+    for item in raw_items:
+        text = _normalize_text(item, limit=200)
+        if text:
+            items.append(text)
+    return items
+
+
+def _idea_fingerprint(name: str, description: str) -> str:
+    """Build a lowercase fingerprint for loose duplicate detection."""
+    return f"{name.strip().lower()}::{description.strip().lower()}"
+
+
+def normalize_idea(idea: dict) -> dict:
+    """Normalize and validate a single idea payload."""
+    if not isinstance(idea, dict):
+        raise ValueError("Each idea must be a JSON object.")
+
+    description = _normalize_text(idea.get("description"))
+    if not description:
+        raise ValueError("Idea is missing description.")
+
+    name = _normalize_text(idea.get("name"), limit=200) or description[:200]
+    normalized = {
+        "name": name,
+        "description": description,
+        "reasoning": _normalize_text(idea.get("reasoning")),
+        "topic_cluster": _normalize_text(idea.get("topic_cluster")),
+        "top_pick": bool(idea.get("top_pick")),
+    }
+
+    for i in range(1, 6):
+        normalized[f"hook_{i}"] = _normalize_text(idea.get(f"hook_{i}"))
+    if not normalized["hook_1"]:
+        normalized["hook_1"] = _normalize_text(idea.get("suggested_hook"))
+
+    angle = _normalize_text(idea.get("angle"), limit=100)
+    if angle in VALID_ANGLES:
+        normalized["angle"] = angle
+
+    format_value = _normalize_text(idea.get("format"), limit=100)
+    if format_value in VALID_FORMATS:
+        normalized["format"] = format_value
+
+    urgency = _normalize_text(idea.get("urgency"), limit=100)
+    if urgency in VALID_URGENCIES:
+        normalized["urgency"] = urgency
+
+    frame_types = [frame for frame in _normalize_list(idea.get("frame_type")) if frame in VALID_FRAMES]
+    if frame_types:
+        normalized["frame_type"] = frame_types
+
+    filming_setup = [setup for setup in _normalize_list(idea.get("filming_setup")) if setup in VALID_SETUPS]
+    if filming_setup:
+        normalized["filming_setup"] = filming_setup
+
+    filming_priority = _normalize_text(idea.get("filming_priority"), limit=100)
+    if filming_priority in VALID_PRIORITIES:
+        normalized["filming_priority"] = filming_priority
+
+    score = idea.get("score")
+    if score is not None:
+        try:
+            score_value = float(score)
+        except (ValueError, TypeError) as exc:
+            raise ValueError(f"Invalid score: {score}") from exc
+        if not 0 <= score_value <= 10:
+            raise ValueError("Score must be between 0 and 10.")
+        normalized["score"] = score_value
+
+    return normalized
+
+
+def query_existing_ideas(source_page_id: str = "", source_url: str = "") -> list[dict]:
+    """Fetch existing Content Ideas for the same source relation or source URL."""
+    filters = []
+    if source_page_id:
+        filters.append({
+            "property": "Source Link",
+            "relation": {"contains": source_page_id},
+        })
+    if source_url:
+        filters.append({
+            "property": "Original URL",
+            "url": {"equals": source_url},
+        })
+
+    if not filters:
+        return []
+
+    body = {"page_size": 100}
+    if len(filters) == 1:
+        body["filter"] = filters[0]
+    else:
+        body["filter"] = {"or": filters}
+
+    results = []
+    has_more = True
+    start_cursor = None
+
+    while has_more:
+        query_body = dict(body)
+        if start_cursor:
+            query_body["start_cursor"] = start_cursor
+
+        resp = requests.post(
+            f"https://api.notion.com/v1/databases/{NOTION_IDEAS_DB_ID}/query",
+            headers=NOTION_HEADERS,
+            json=query_body,
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            print(f"Error querying existing ideas: {resp.status_code} {resp.text[:200]}")
+            return results
+
+        data = resp.json()
+        for page in data.get("results", []):
+            props = page["properties"]
+            results.append({
+                "page_id": page["id"],
+                "name": get_text_prop(props, "Name"),
+                "description": get_text_prop(props, "Description"),
+            })
+
+        has_more = data.get("has_more", False)
+        start_cursor = data.get("next_cursor")
+
+    return results
+
+
+def find_duplicate_idea(idea: dict, existing_ideas: list[dict]) -> dict | None:
+    """Return the matched idea if name+description fingerprint already exists."""
+    fingerprint = _idea_fingerprint(idea["name"], idea["description"])
+    for existing in existing_ideas:
+        if _idea_fingerprint(existing.get("name", ""), existing.get("description", "")) == fingerprint:
+            return existing
+    return None
 
 
 def query_generate_ideas_links() -> list[dict]:
@@ -188,25 +355,21 @@ def create_idea_in_notion(idea: dict, source_page_id: str, source_url: str = "")
         properties["Original URL"] = {"url": source_url}
 
     # Set angle if valid
-    valid_angles = ["copy_it", "remix_it", "react_to_it", "tool_review", "freebie_inspiration"]
-    if idea.get("angle") in valid_angles:
+    if idea.get("angle") in VALID_ANGLES:
         properties["Angle"] = {"select": {"name": idea["angle"]}}
 
     # Set format if valid
-    valid_formats = ["talking_head", "split_screen", "carousel"]
-    if idea.get("format") in valid_formats:
+    if idea.get("format") in VALID_FORMATS:
         properties["Format"] = {"select": {"name": idea["format"]}}
 
     # Set urgency if valid
-    valid_urgencies = ["newsworthy", "evergreen"]
-    if idea.get("urgency") in valid_urgencies:
+    if idea.get("urgency") in VALID_URGENCIES:
         properties["Urgency"] = {"select": {"name": idea["urgency"]}}
 
     # Set frame_type if valid (multi-select)
-    valid_frames = ["pain", "prize", "news"]
     frame_types = idea.get("frame_type", [])
     if isinstance(frame_types, list):
-        frames = [{"name": f} for f in frame_types if f in valid_frames]
+        frames = [{"name": f} for f in frame_types if f in VALID_FRAMES]
         if frames:
             properties["Frame Type"] = {"multi_select": frames}
 
@@ -228,18 +391,16 @@ def create_idea_in_notion(idea: dict, source_page_id: str, source_url: str = "")
         properties["Top Pick"] = {"checkbox": True}
 
     # Set filming setup if valid (multi-select)
-    valid_setups = ["talking_head", "screen_recording", "walk_and_talk", "studio", "split_screen_react"]
     filming_setup = idea.get("filming_setup", [])
     if isinstance(filming_setup, str):
         filming_setup = [filming_setup]
     if isinstance(filming_setup, list):
-        setups = [{"name": s} for s in filming_setup if s in valid_setups]
+        setups = [{"name": s} for s in filming_setup if s in VALID_SETUPS]
         if setups:
             properties["Filming Setup"] = {"multi_select": setups}
 
     # Set filming priority if valid
-    valid_priorities = ["film_now", "film_soon", "batch_next", "shelved"]
-    if idea.get("filming_priority") in valid_priorities:
+    if idea.get("filming_priority") in VALID_PRIORITIES:
         properties["Filming Priority"] = {"select": {"name": idea["filming_priority"]}}
 
     # Link to source
@@ -283,14 +444,45 @@ def save_ideas(ideas_json: str, source_page_id: str, source_url: str = "") -> in
         print(f"Error parsing ideas JSON: {e}")
         return 0
 
+    source_link = get_link_by_id(source_page_id)
+    if not source_link:
+        print(f"Source page not found: {source_page_id}")
+        return 0
+
+    existing_ideas = query_existing_ideas(source_page_id, source_url or source_link.get("url", ""))
+
     saved = 0
-    for idea in ideas:
-        if create_idea_in_notion(idea, source_page_id, source_url):
+    skipped_duplicates = 0
+    validation_errors = 0
+    for index, idea in enumerate(ideas, 1):
+        try:
+            normalized = normalize_idea(idea)
+        except ValueError as exc:
+            validation_errors += 1
+            print(f"  Skipped idea {index}: {exc}")
+            continue
+
+        duplicate = find_duplicate_idea(normalized, existing_ideas)
+        if duplicate:
+            skipped_duplicates += 1
+            print(f"  Skipped duplicate: {normalized['name'][:60]}")
+            continue
+
+        if create_idea_in_notion(normalized, source_page_id, source_url or source_link.get("url", "")):
             saved += 1
-            print(f"  Saved: {idea.get('angle', '?')} — {idea.get('description', '')[:60]}")
+            existing_ideas.append({
+                "name": normalized["name"],
+                "description": normalized["description"],
+            })
+            print(f"  Saved: {normalized.get('angle', '?')} — {normalized.get('description', '')[:60]}")
 
     if saved > 0:
         mark_link_processed(source_page_id)
+
+    if validation_errors:
+        print(f"  Validation errors: {validation_errors}")
+    if skipped_duplicates:
+        print(f"  Duplicates skipped: {skipped_duplicates}")
 
     return saved
 
