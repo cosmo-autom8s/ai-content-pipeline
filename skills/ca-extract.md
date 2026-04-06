@@ -5,6 +5,8 @@ description: Extract transcripts from pending short-form links using TokScript M
 
 Extract transcripts from pending TikTok/Instagram/YouTube links in the Notion Links Queue using TokScript MCP tools — no manual CSV export needed.
 
+This skill is Claude Code specific. In Codex, use the queued extraction-job workflow documented in `docs/superpowers/guides/2026-04-06-runtime-modes-and-operator-guide.md`.
+
 ## Steps
 
 1. **Query pending links.** Use the Notion MCP to query the Links Queue database (`$NOTION_LINKS_DB_ID`) for all pages with `Status = "pending"`. From each page, extract: `page_id`, `Name`, `Link URL`, and `Category`.
@@ -16,7 +18,7 @@ Extract transcripts from pending TikTok/Instagram/YouTube links in the Notion Li
 
 3. **Check extraction limits.** Free TokScript tier allows 5 extractions/day. If there are more extractable links than the limit, warn the user and ask which ones to prioritize. Suggest using `get_bulk_transcripts` if available (Pro/Premium only).
 
-4. **Extract transcripts.** For each link, call the appropriate MCP tool:
+4. **Extract transcripts.** For each link, call the appropriate Claude MCP tool:
    - **Instagram:** `mcp__claude_ai_Tokscript__get_instagram_transcript` with `video_url` and `format: "json"`
    - **TikTok:** `mcp__claude_ai_Tokscript__get_tiktok_transcript` with `video_url` and `format: "json"`
    - **YouTube:** `mcp__claude_ai_Tokscript__get_youtube_transcript` with `video_url` and `format: "json"`
@@ -46,17 +48,10 @@ Extract transcripts from pending TikTok/Instagram/YouTube links in the Notion Li
 
    If a page doesn't exist for the URL (link was added outside bot), create a new page with the appropriate `Category` set from platform detection.
 
-7. **Save backup.** Run `python -c` to save the extracted data as JSON backup:
-   ```
-   python -c "
-   from extractors.mcp_normalizer import save_backup
-   import json, sys
-   results = json.loads(sys.argv[1])
-   path = save_backup(results)
-   print(f'Backup saved: {path}')
-   " '<json_array>'
-   ```
-   Or write the JSON directly to `csv_inbox/mcp_extracts/mcp_extract_<timestamp>.json`.
+7. **Save backup.** Prefer the shared runtime backup flow used by the repo:
+   - raw agent output in `csv_inbox/mcp_extracts/`
+   - structured backup JSON in `csv_inbox/mcp_extracts/`
+   - if using the Codex job flow instead, complete the queued job with `python extractors/extraction_jobs.py --complete ...`
 
 8. **Report results.** Show a summary:
    - Total extracted: X / Y

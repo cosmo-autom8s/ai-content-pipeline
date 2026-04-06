@@ -69,21 +69,23 @@ You can run the same system in three ways:
 |------|----------|-----------------|--------------|---------|
 | Claude Automated | Cron jobs, unattended nightly runs | Python orchestrator + Claude CLI subprocess + TokScript MCP | Spends Anthropic credits | Most automated today, but extraction uses Claude credits |
 | Hybrid | Cheaper unattended classification | Claude for extraction, OpenRouter for classifier | Cheaper than full Claude, can be near-free for classification | Free OpenRouter models can be slow, rate-limited, or timeout |
-| Codex Session-Native | Manual operator runs in ChatGPT Codex | Python for queueing + Codex MCP for extraction + optional in-session classification | Spends OpenAI credits instead of Anthropic | Not fully unattended yet; Codex extraction runs through queued jobs in-session |
+| Codex Session-Native | Manual operator runs in ChatGPT Codex | Python for queueing + Codex MCP for extraction + optional in-session classification | Spends OpenAI credits (much cheaper) instead of Anthropic | Not fully unattended yet; Codex extraction runs through queued jobs in-session |
 
 Recommended use:
 
 - Use `Claude Automated` when you want the nightly pipeline to run unattended.
 - Use `Hybrid` when you want to keep automation but reduce Anthropic spend.
-- Use `Codex Session-Native` when you want to operate the system locally in a Codex session and keep extraction/classification inside that session as much as possible.
+- Use `Codex Session-Native` when you want the best bang for your buck and do not mind pressing a few buttons to run it manually.
 
-Reference guide: [2026-04-06-runtime-modes-and-operator-guide.md](/Users/cosmo/Documents/AIProjects/content-pipeline-bot/docs/superpowers/guides/2026-04-06-runtime-modes-and-operator-guide.md)
+Reference guide: [2026-04-06-runtime-modes-and-operator-guide.md](docs/superpowers/guides/2026-04-06-runtime-modes-and-operator-guide.md)
 
 ---
 
 ## Content Agent
 
 The Content Agent is an upgrade from a capture-and-process tool into a conversational content sparring partner. Instead of just running scripts, you can open a Claude or Codex session and talk through ideas, get a morning brief, run classification interactively, or spar on hooks and angles — all grounded in your Notion backlog, brand principles, and 9 knowledge files. Every classified video automatically enriches the knowledge files, making future briefs, ideation, and sparring sessions more informed.
+
+`/ca-*` slash commands are Claude Code skills. Codex can perform the same underlying workflows, but not through the same slash-command interface.
 
 ### `/ca-*` Commands
 

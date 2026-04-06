@@ -5,13 +5,15 @@ description: Run the classifier on transcribed links — auto-tag and extract in
 
 Run the classifier on transcribed links to auto-tag content and extract insights.
 
+This skill is Claude Code specific. Codex can run the same workflow either by invoking `python engines/classifier.py` or by classifying links directly in-session when OpenRouter is slow or rate-limited.
+
 ## Steps
 
-1. **Dry run first.** Run `python engines/classifier.py --dry-run` to show what would be classified without making any changes. Display the list of links that would be processed, along with the tags that would be applied to each.
+1. **Dry run first.** Run `python engines/classifier.py --dry-run` to show what would be classified without making any changes. Display the list of links that would be processed.
 
 2. **Ask for confirmation.** Show the user the dry-run results and ask: "Ready to classify all of these, or do you want to pick specific links?" If they specify links, pass them as arguments to the classifier.
 
-3. **Run the classifier.** On confirmation, run `python engines/classifier.py` (or with specific link IDs if the user selected a subset).
+3. **Run the classifier.** On confirmation, run `python engines/classifier.py` (or with specific link IDs if the user selected a subset). If OpenRouter is too slow or failing, you may classify a small batch directly in-session using the same tag schema and then write results back to Notion plus Obsidian.
 
 4. **Show results summary.** After the run completes, report:
    - How many links were classified
