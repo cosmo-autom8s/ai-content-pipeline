@@ -253,6 +253,8 @@ Queued prompt jobs can be inspected with:
 ```bash
 python extractors/extraction_jobs.py       # List pending extraction jobs
 python extractors/extraction_jobs.py --id JOB_ID
+python extractors/extraction_jobs.py --complete JOB_ID --output-file /path/to/agent_output.txt
+python extractors/extraction_jobs.py --fail JOB_ID --error "reason"
 ```
 
 ### 8. Run the classifier (optional, runs automatically in orchestrator)

@@ -5,6 +5,7 @@ from unittest.mock import patch
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from extractors.extraction_jobs import complete_job_from_output, fail_job, load_job
 from extractors.runtime import build_extract_worker_prompt, create_extraction_job, get_runtime_config
 
 
@@ -78,3 +79,52 @@ def test_create_extraction_job_writes_pending_job_file():
         assert job_path.exists()
         assert "\"status\": \"pending\"" in payload
         assert "\"scope\": \"youtube\"" in payload
+
+
+def test_complete_extraction_job_from_output_marks_completed():
+    with TemporaryDirectory() as temp_dir:
+        base = Path(temp_dir)
+        backup_dir = base / "backups"
+        job_dir = base / "jobs"
+        config = get_runtime_config()
+        job_path = create_extraction_job(
+            [{"page_id": "abc", "url": "https://youtu.be/12345678901", "name": "Video"}],
+            "youtube",
+            "prompt text",
+            config,
+            backup_dir=backup_dir,
+            job_dir=job_dir,
+        )
+
+        output = (
+            "some agent log\n"
+            'EXTRACT_RESULT::{"extracted": 1, "failed": 0, "details": [{"url": "https://youtu.be/12345678901", "status": "ok", "title": "Video"}]}\n'
+        )
+        job = complete_job_from_output(job_path.stem, output, job_dir=job_dir, backup_dir=backup_dir)
+
+        assert job["status"] == "completed"
+        assert job["result"]["parsed"] is True
+        assert job["result"]["extracted"] == 1
+        assert Path(job["result"]["raw_output_path"]).exists()
+        assert Path(job["result"]["structured_backup_path"]).exists()
+
+
+def test_fail_job_marks_failed_with_error():
+    with TemporaryDirectory() as temp_dir:
+        base = Path(temp_dir)
+        backup_dir = base / "backups"
+        job_dir = base / "jobs"
+        config = get_runtime_config()
+        job_path = create_extraction_job(
+            [{"page_id": "abc", "url": "https://youtu.be/12345678901", "name": "Video"}],
+            "youtube",
+            "prompt text",
+            config,
+            backup_dir=backup_dir,
+            job_dir=job_dir,
+        )
+
+        fail_job(job_path.stem, "manual failure", job_dir=job_dir)
+        job = load_job(job_path)
+        assert job["status"] == "failed"
+        assert job["result"]["error"] == "manual failure"
