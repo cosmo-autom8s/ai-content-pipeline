@@ -5,12 +5,11 @@ and Obsidian knowledge-file writes, plus Notion integration and CLI.
 import json
 import os
 import re
-import subprocess
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional
 
 import requests
 from dotenv import load_dotenv
@@ -26,6 +25,7 @@ LOCAL_KNOWLEDGE_DIR = Path(__file__).parent.parent / "knowledge"
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 CLASSIFIER_MODEL = os.getenv("CLASSIFIER_MODEL", "qwen/qwen3.6-plus:free")
+CLASSIFIER_FALLBACK_MODEL = os.getenv("CLASSIFIER_FALLBACK_MODEL", "").strip()
 
 NOTION_HEADERS = {
     "Authorization": f"Bearer {NOTION_API_KEY}",
@@ -44,10 +44,28 @@ LOG_DIR = Path(__file__).parent.parent / "logs"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 
-def _call_llm(prompt: str) -> Optional[str]:
-    """Call OpenRouter API for classification. Retries on 429 with 30s backoff."""
+def validate_classifier_config() -> None:
+    """Validate runtime configuration before making network calls."""
+    missing = []
+    if not NOTION_API_KEY:
+        missing.append("NOTION_API_KEY")
+    if not NOTION_LINKS_DB_ID:
+        missing.append("NOTION_LINKS_DB_ID")
     if not OPENROUTER_API_KEY:
-        raise RuntimeError("OPENROUTER_API_KEY not set in .env")
+        missing.append("OPENROUTER_API_KEY")
+    if missing:
+        raise RuntimeError(f"Missing required classifier config: {', '.join(missing)}")
+    if not PROMPT_TEMPLATE_PATH.exists():
+        raise RuntimeError(f"Classifier prompt template missing: {PROMPT_TEMPLATE_PATH}")
+    if not CREATOR_CONTEXT_PATH.exists():
+        raise RuntimeError(f"Creator context missing: {CREATOR_CONTEXT_PATH}")
+
+
+def _openrouter_request(prompt: str, model: str) -> tuple[Optional[str], Optional[str]]:
+    """Call OpenRouter for a single model attempt.
+
+    Returns `(content, error_detail)`.
+    """
     for attempt in range(3):
         resp = requests.post(
             url=OPENROUTER_URL,
@@ -56,7 +74,7 @@ def _call_llm(prompt: str) -> Optional[str]:
                 "Content-Type": "application/json",
             },
             data=json.dumps({
-                "model": CLASSIFIER_MODEL,
+                "model": model,
                 "messages": [{"role": "user", "content": prompt}],
             }),
             timeout=120,
@@ -65,13 +83,37 @@ def _call_llm(prompt: str) -> Optional[str]:
             data = resp.json()
             choices = data.get("choices", [])
             if not choices:
-                return None
-            return choices[0].get("message", {}).get("content")
+                return None, f"{model}: empty choices in response"
+            return choices[0].get("message", {}).get("content"), None
         if resp.status_code == 429 and attempt < 2:
-            print(f"    ⏳ Rate limited, retrying in 30s (attempt {attempt + 1}/3)...")
+            print(f"    ⏳ {model} rate limited, retrying in 30s (attempt {attempt + 1}/3)...")
             time.sleep(30)
             continue
-        return None
+        body_preview = resp.text[:400]
+        return None, f"{model}: HTTP {resp.status_code} — {body_preview}"
+    return None, f"{model}: exhausted retries after repeated rate limiting"
+
+
+def _call_llm(prompt: str) -> tuple[Optional[str], Optional[str], str]:
+    """Call OpenRouter with primary model and optional fallback model.
+
+    Returns `(content, error_detail, model_used)`.
+    """
+    models = [CLASSIFIER_MODEL]
+    if CLASSIFIER_FALLBACK_MODEL and CLASSIFIER_FALLBACK_MODEL != CLASSIFIER_MODEL:
+        models.append(CLASSIFIER_FALLBACK_MODEL)
+
+    error_messages = []
+    for idx, model in enumerate(models):
+        content, error_detail = _openrouter_request(prompt, model)
+        if content is not None:
+            return content, None, model
+        if error_detail:
+            error_messages.append(error_detail)
+        if idx < len(models) - 1:
+            print(f"    ⏳ Primary model unavailable, retrying with fallback: {models[idx + 1]}")
+
+    return None, " | ".join(error_messages), models[0]
 
 
 def _load_prompt_template() -> str:
@@ -457,7 +499,7 @@ def classify_link(link, dry_run=False):
     print(f"  Classifying: {link['name'][:60]}")
 
     try:
-        output = _call_llm(prompt)
+        output, error_detail, model_used = _call_llm(prompt)
     except Exception as e:
         print(f"    ⏳ Error: {e}")
         log_classification_error(link["page_id"], str(e))
@@ -465,8 +507,8 @@ def classify_link(link, dry_run=False):
         return False
 
     if output is None:
-        print(f"    ❌ No response from OpenRouter")
-        log_classification_error(link["page_id"], "empty response")
+        print(f"    ❌ No usable response from OpenRouter")
+        log_classification_error(link["page_id"], error_detail or "empty response")
         mark_classification_error(link["page_id"])
         return False
 
@@ -474,15 +516,18 @@ def classify_link(link, dry_run=False):
     if parsed is None:
         # Retry once
         try:
-            output = _call_llm(prompt)
+            output, retry_error, retry_model = _call_llm(prompt)
             if output:
                 parsed = parse_classifier_output(output)
+                model_used = retry_model
+            elif retry_error:
+                error_detail = retry_error
         except Exception:
             pass
 
     if parsed is None:
         print(f"    ❌ Could not parse output")
-        log_classification_error(link["page_id"], output or "no output")
+        log_classification_error(link["page_id"], output or error_detail or "no output")
         mark_classification_error(link["page_id"])
         return False
 
@@ -493,6 +538,7 @@ def classify_link(link, dry_run=False):
         return False
 
     print(f"    ✅ Tags: {', '.join(tags)}")
+    print(f"    🧠 Model: {model_used}")
 
     # Write insights to Obsidian knowledge files
     knowledge_dir = get_knowledge_dir()
@@ -539,6 +585,7 @@ def classify_link(link, dry_run=False):
 # ---------------------------------------------------------------------------
 
 def classify_all_transcribed(dry_run=False, retry_errors=False, limit=None):
+    validate_classifier_config()
     if retry_errors:
         links = query_error_links()
         print(f"Found {len(links)} links with classification_error")

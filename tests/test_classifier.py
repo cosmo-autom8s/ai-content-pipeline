@@ -2,11 +2,14 @@
 
 import pytest
 from pathlib import Path
+from unittest.mock import patch
 from engines.classifier import (
     parse_classifier_output,
     truncate_transcript,
     format_obsidian_entry,
     append_to_knowledge_file,
+    validate_classifier_config,
+    _call_llm,
 )
 
 
@@ -56,6 +59,29 @@ def test_parse_garbage_returns_none():
 def test_parse_empty_returns_none():
     result = parse_classifier_output("")
     assert result is None
+
+
+def test_validate_classifier_config_passes_when_required_config_present():
+    validate_classifier_config()
+
+
+def test_call_llm_uses_fallback_model_on_primary_failure():
+    responses = [
+        (None, "primary failed"),
+        ("{\"tags\": [\"content_lesson\"], \"summary\": \"ok\"}", None),
+    ]
+
+    def fake_request(prompt, model):
+        return responses.pop(0)
+
+    with patch("engines.classifier.CLASSIFIER_MODEL", "primary-model"), patch(
+        "engines.classifier.CLASSIFIER_FALLBACK_MODEL", "fallback-model"
+    ), patch("engines.classifier._openrouter_request", side_effect=fake_request):
+        output, error, model_used = _call_llm("prompt")
+
+    assert output is not None
+    assert error is None
+    assert model_used == "fallback-model"
 
 
 # ---------------------------------------------------------------------------
